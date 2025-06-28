@@ -25,7 +25,7 @@ pub struct FilePickerState {
 pub enum FilePickerEvent {
     Quit,
     Poll,
-    SelectedFile(String),
+    SelectedFile(PathBuf),
 }
 
 impl FilePickerState {
@@ -110,8 +110,7 @@ impl FilePickerState {
                         self.reload_dir = true;
                     }
                     FileType::File(f) => {
-                        let result = self.cwd.join(f).to_string_lossy().into_owned();
-                        let result = FilePickerEvent::SelectedFile(result);
+                        let result = FilePickerEvent::SelectedFile(self.cwd.join(f));
                         self.files.clear();
                         return result;
                     }

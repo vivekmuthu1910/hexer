@@ -5,6 +5,7 @@ use ratatui::{DefaultTerminal, Frame};
 use viewer::{ViewerEvent, ViewerState};
 
 mod file_picker;
+mod utils;
 mod viewer;
 
 fn main() -> color_eyre::Result<()> {

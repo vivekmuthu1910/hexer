@@ -1,12 +1,16 @@
+use super::utils::last_n_components;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use file_viewer::FileViewer;
 use ratatui::{
     Frame,
-    layout::{Constraint, Flex, Layout, Rect},
+    layout::{Constraint, Flex, Layout, Margin, Rect},
     style::{Color, Style, Stylize},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph, Widget},
 };
-use std::{fmt, io::Result};
+use std::{fmt, io::Result, path::PathBuf};
+
+mod file_viewer;
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub enum DataType {
@@ -41,6 +45,13 @@ impl DataType {
     ];
 }
 
+#[derive(Debug, Default, PartialEq, Eq)]
+pub enum Endianness {
+    #[default]
+    Little,
+    Big,
+}
+
 impl fmt::Display for DataType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -60,9 +71,11 @@ impl fmt::Display for DataType {
 pub struct ViewerState {
     data_type: DataType,
     display_type: DisplayType,
-    file: String,
+    endianness: Endianness,
+    file: PathBuf,
     // search_field: String,
     action_mode: ActionMode,
+    inner: FileViewer,
 }
 
 pub enum ViewerEvent {
@@ -83,7 +96,7 @@ fn render_button(name: String, btn_color: Color, text_color: Color) -> impl Widg
 }
 
 impl ViewerState {
-    pub fn with_file(mut self, file: String) -> Self {
+    pub fn with_file(mut self, file: PathBuf) -> Self {
         self.file = file;
         self
     }
@@ -103,6 +116,8 @@ impl ViewerState {
             }
             (_, KeyCode::Char('d')) => self.display_type = DisplayType::Decimal,
             (_, KeyCode::Char('x')) => self.display_type = DisplayType::HexaDecimal,
+            (_, KeyCode::Char('l')) => self.endianness = Endianness::Little,
+            (_, KeyCode::Char('b')) => self.endianness = Endianness::Big,
             (KeyModifiers::CONTROL, KeyCode::Char('t')) => {
                 self.action_mode = ActionMode::SelectDataType(None)
             }
@@ -139,17 +154,56 @@ impl ViewerState {
 
     pub fn render_viewer(&mut self, frame: &mut Frame) -> Result<()> {
         let page_layout = Layout::vertical([
-            Constraint::Length(1),
+            Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Fill(1),
         ])
         .areas::<3>(frame.area());
 
-        let file_name = Line::from(vec![
-            Span::styled("File: ", Style::default().fg(Color::Yellow)),
-            Span::styled(" ", Style::default().bg(Color::Gray)),
+        let layout = Layout::horizontal([Constraint::Length(70), Constraint::Fill(1)])
+            .areas::<2>(page_layout[0]);
+        self.render_file_name(layout[0], frame);
+        self.render_search_bar(layout[1], frame);
+
+        let layout = Layout::horizontal([
+            Constraint::Length(72),
+            Constraint::Length(32),
+            Constraint::Length(23),
+        ])
+        .flex(Flex::SpaceAround)
+        .areas::<3>(page_layout[1]);
+
+        self.render_dt_buttons(layout[0], frame);
+        self.render_display_buttons(layout[1], frame);
+        self.render_endianness_buttons(layout[2], frame);
+
+        frame.render_widget(&self.inner, page_layout[2]);
+        Ok(())
+    }
+
+    fn render_file_name(&mut self, rect: Rect, frame: &mut Frame) {
+        let b = Block::default()
+            .border_style(Style::default().fg(Color::Cyan))
+            .border_type(BorderType::Rounded)
+            .borders(Borders::ALL)
+            .title(Line::from(" File "));
+        frame.render_widget(b, rect);
+        let (file_comp_n, file_name_3comp) = last_n_components(&self.file, 3);
+        let mut file_name = Line::from(Span::styled(" ", Style::default().bg(Color::Gray)));
+        if file_comp_n > 3 {
+            file_name.push_span(Span::styled(
+                ".../",
+                Style::default()
+                    .fg(Color::LightBlue)
+                    .bg(Color::Gray)
+                    .bold()
+                    .italic(),
+            ));
+        }
+
+        file_name.extend(vec![
             Span::styled(
-                self.file.as_str(),
+                file_name_3comp.to_str().unwrap(),
                 Style::default()
                     .fg(Color::LightBlue)
                     .bg(Color::Gray)
@@ -158,27 +212,22 @@ impl ViewerState {
             ),
             Span::styled(" ", Style::default().bg(Color::Gray)),
         ]);
-        //Paragraph::new(self.file.as_str()).bold().blue();
-        frame.render_widget(file_name, page_layout[0]);
+        frame.render_widget(
+            file_name,
+            rect.inner(Margin {
+                horizontal: 2,
+                vertical: 1,
+            }),
+        );
+    }
 
-        let layout = Layout::horizontal([
-            Constraint::Length(72),
-            Constraint::Length(32),
-            Constraint::Fill(1),
-        ])
-        .areas::<3>(page_layout[1]);
-
-        self.render_dt_buttons(layout[0], frame);
-        self.render_display_buttons(layout[1], frame);
-
+    fn render_search_bar(&mut self, rect: Rect, frame: &mut Frame) {
         let b = Block::default()
             .title(" Search ")
             .border_style(Style::default().fg(Color::Rgb(70, 70, 70)))
             .border_type(BorderType::Rounded)
             .borders(Borders::ALL);
-        frame.render_widget(b, layout[2]);
-
-        Ok(())
+        frame.render_widget(b, rect);
     }
 
     fn render_display_buttons(&self, rect: Rect, frame: &mut Frame) {
@@ -186,7 +235,7 @@ impl ViewerState {
             .border_style(Style::default().fg(Color::Cyan))
             .border_type(BorderType::Rounded)
             .borders(Borders::ALL)
-            .title(Line::from(" Display Type ").centered());
+            .title(Line::from(" Display Type "));
         frame.render_widget(b, rect);
 
         use Constraint::Length;
@@ -209,12 +258,40 @@ impl ViewerState {
         frame.render_widget(btn2, btn_layout[1]);
     }
 
+    fn render_endianness_buttons(&self, rect: Rect, frame: &mut Frame) {
+        let b = Block::default()
+            .border_style(Style::default().fg(Color::Cyan))
+            .border_type(BorderType::Rounded)
+            .borders(Borders::ALL)
+            .title(Line::from(" Endianness "));
+        frame.render_widget(b, rect);
+
+        use Constraint::Length;
+        let btn_layout = Layout::horizontal([Length(10), Length(7)])
+            .flex(Flex::SpaceBetween)
+            .vertical_margin(1)
+            .horizontal_margin(2)
+            .split(rect);
+        let (btn1, btn2) = match self.endianness {
+            Endianness::Little => (
+                render_button("Little".to_string(), Color::Green, Color::Black),
+                render_button("Big".to_string(), Color::Yellow, Color::Black),
+            ),
+            Endianness::Big => (
+                render_button("Little".to_string(), Color::Yellow, Color::Black),
+                render_button("Big".to_string(), Color::Green, Color::Black),
+            ),
+        };
+        frame.render_widget(btn1, btn_layout[0]);
+        frame.render_widget(btn2, btn_layout[1]);
+    }
+
     fn render_dt_buttons(&self, rect: Rect, frame: &mut Frame) {
         let b = Block::default()
             .border_style(Style::default().fg(Color::Cyan))
             .border_type(BorderType::Rounded)
             .borders(Borders::ALL)
-            .title(Line::from(" Data Type ").centered());
+            .title(Line::from(" Data Type "));
         frame.render_widget(b, rect);
 
         use Constraint::Length;
@@ -231,7 +308,6 @@ impl ViewerState {
         .flex(Flex::SpaceBetween)
         .vertical_margin(1)
         .horizontal_margin(2)
-        // .spacing(2)
         .split(rect);
 
         for (i, val) in DataType::ALL.iter().enumerate() {
