@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     Frame,
-    layout::{Constraint, Flex, Layout},
+    layout::{Constraint, Flex, Layout, Rect},
     style::{Color, Style, Stylize},
     text::Line,
     widgets::{Block, BorderType, Borders, Paragraph, Widget},
@@ -52,6 +52,7 @@ impl fmt::Display for DataType {
 pub struct ViewerState {
     data_type: DataType,
     file: String,
+    search_field: String,
 }
 
 pub enum ViewerEvent {
@@ -59,9 +60,13 @@ pub enum ViewerEvent {
     Poll,
 }
 
+pub enum ActionMode {
+    SelectDataType,
+    EditSearch,
+}
+
 fn render_button(name: String, btn_color: Color, text_color: Color) -> impl Widget {
     Paragraph::new(name).fg(text_color).bg(btn_color).centered()
-    // .block(Block::default().bg(btn_color))
 }
 
 impl ViewerState {
@@ -92,20 +97,35 @@ impl ViewerState {
         let file_name = Paragraph::new(self.file.as_str()).bold().blue();
         frame.render_widget(file_name, page_layout[0]);
 
+        let layout = Layout::horizontal([Constraint::Fill(2), Constraint::Fill(1)])
+            .areas::<2>(page_layout[1]);
+
         let b = Block::default()
             .border_style(Style::default().fg(Color::Cyan))
             .border_type(BorderType::Rounded)
             .borders(Borders::ALL)
             .title(Line::from(" Data Type ").centered());
 
-        frame.render_widget(b, page_layout[1]);
+        frame.render_widget(b, layout[0]);
 
+        self.render_buttons(layout[0], frame);
+
+        let b = Block::default()
+            .title(" Search ")
+            .border_style(Style::default().fg(Color::Cyan))
+            .border_type(BorderType::Rounded)
+            .borders(Borders::ALL);
+        frame.render_widget(b, layout[1]);
+
+        Ok(())
+    }
+
+    fn render_buttons(&self, rect: Rect, frame: &mut Frame) {
         let btn_layout = Layout::horizontal([Constraint::Max(8); 8])
             .flex(Flex::SpaceBetween)
             .vertical_margin(1)
             .horizontal_margin(10)
-            .split(page_layout[1]);
-
+            .split(rect);
         for (i, val) in DataType::ALL.iter().enumerate() {
             let btn = if &self.data_type == val {
                 render_button(val.to_string(), Color::Green, Color::Black)
@@ -114,7 +134,5 @@ impl ViewerState {
             };
             frame.render_widget(btn, btn_layout[i]);
         }
-
-        Ok(())
     }
 }
