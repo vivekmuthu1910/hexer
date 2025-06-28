@@ -1,15 +1,11 @@
 use color_eyre::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use file_picker::FilePickerState;
-use ratatui::{
-    DefaultTerminal, Frame,
-    layout::{Constraint, Layout},
-    style::Stylize,
-    text::Line,
-    widgets::{Block, Paragraph},
-};
+use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
+use file_picker::{FilePickerEvent, FilePickerState};
+use ratatui::{DefaultTerminal, Frame};
+use viewer::{ViewerEvent, ViewerState};
 
 mod file_picker;
+mod viewer;
 
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
@@ -22,7 +18,7 @@ fn main() -> color_eyre::Result<()> {
 #[derive(Debug)]
 enum Window {
     FilePicker(FilePickerState),
-    HexViewer,
+    HexViewer(ViewerState),
 }
 
 impl Default for Window {
@@ -37,7 +33,6 @@ pub struct App {
     /// Is the application running?
     window: Window,
     running: bool,
-    file: String,
 }
 
 impl App {
@@ -57,17 +52,19 @@ impl App {
     }
 
     fn render(&mut self, frame: &mut Frame) {
-        match &mut self.window {
-            &mut Window::FilePicker(ref mut state) => {
-                match file_picker::render_file_picker(frame, state) {
-                    Ok(file) => self.file = file,
-                    Err(err) => {
-                        eprintln!("Error occured while selecting file {:?}", err);
-                        self.running = false;
-                    }
+        match self.window {
+            Window::FilePicker(ref mut state) => {
+                if let Err(err) = state.render_file_picker(frame) {
+                    eprintln!("Error occured while selecting file {:?}", err);
+                    self.running = false;
                 }
             }
-            Window::HexViewer => todo!(),
+            Window::HexViewer(ref mut state) => {
+                if let Err(err) = state.render_viewer(frame) {
+                    eprintln!("Error occured while selecting file {:?}", err);
+                    self.running = false;
+                }
+            }
         }
     }
 
@@ -84,16 +81,21 @@ impl App {
 
     /// Handles the key events and updates the state of [`App`].
     fn on_key_event(&mut self, key: KeyEvent) {
-        let quit = match &mut self.window {
-            &mut Window::FilePicker(ref mut state) => file_picker::handle_key(key, state),
-            Window::HexViewer => todo!(),
+        match self.window {
+            Window::FilePicker(ref mut state) => match state.handle_key(key) {
+                FilePickerEvent::Quit => self.quit(),
+                FilePickerEvent::Poll => {}
+                FilePickerEvent::SelectedFile(f) => {
+                    self.window = Window::HexViewer(ViewerState::default().with_file(f))
+                }
+            },
+            Window::HexViewer(ref mut state) => match state.handle_key(key) {
+                ViewerEvent::Quit => self.quit(),
+                ViewerEvent::Poll => {}
+            },
         };
-        if quit {
-            self.quit();
-        }
     }
 
-    /// Set running to false to quit the application.
     fn quit(&mut self) {
         self.running = false;
     }
