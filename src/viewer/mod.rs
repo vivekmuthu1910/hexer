@@ -8,74 +8,19 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph, Widget},
 };
-use std::{fmt, io::Result, path::PathBuf};
+use std::{fs, io::Result, path::PathBuf};
 
+mod common_dt;
 mod file_viewer;
 
-#[derive(Debug, Default, PartialEq, Eq)]
-pub enum DataType {
-    #[default]
-    U8,
-    I8,
-    U16,
-    I16,
-    U32,
-    I32,
-    F16,
-    F32,
-}
-
-#[derive(Debug, Default, PartialEq, Eq)]
-pub enum DisplayType {
-    #[default]
-    Decimal,
-    HexaDecimal,
-}
-
-impl DataType {
-    const ALL: [DataType; 8] = [
-        DataType::U8,
-        DataType::I8,
-        DataType::U16,
-        DataType::I16,
-        DataType::U32,
-        DataType::I32,
-        DataType::F16,
-        DataType::F32,
-    ];
-}
-
-#[derive(Debug, Default, PartialEq, Eq)]
-pub enum Endianness {
-    #[default]
-    Little,
-    Big,
-}
-
-impl fmt::Display for DataType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            DataType::U8 => write!(f, "U8"),
-            DataType::I8 => write!(f, "I8"),
-            DataType::U16 => write!(f, "U16"),
-            DataType::I16 => write!(f, "I16"),
-            DataType::U32 => write!(f, "U32"),
-            DataType::I32 => write!(f, "I32"),
-            DataType::F16 => write!(f, "F16"),
-            DataType::F32 => write!(f, "F32"),
-        }
-    }
-}
+use common_dt::{DataType, DisplayType, Endianness};
 
 #[derive(Debug, Default)]
 pub struct ViewerState {
-    data_type: DataType,
-    display_type: DisplayType,
-    endianness: Endianness,
     file: PathBuf,
-    // search_field: String,
     action_mode: ActionMode,
-    inner: FileViewer,
+    file_viewer: FileViewer,
+    // search_field: String,
 }
 
 pub enum ViewerEvent {
@@ -87,8 +32,8 @@ pub enum ViewerEvent {
 pub enum ActionMode {
     #[default]
     Normal,
-    // EditSearch,
     SelectDataType(Option<KeyCode>),
+    // EditSearch,
 }
 
 fn render_button(name: String, btn_color: Color, text_color: Color) -> impl Widget {
@@ -114,10 +59,10 @@ impl ViewerState {
             | (KeyModifiers::CONTROL, KeyCode::Char('c') | KeyCode::Char('C')) => {
                 return ViewerEvent::Quit;
             }
-            (_, KeyCode::Char('d')) => self.display_type = DisplayType::Decimal,
-            (_, KeyCode::Char('x')) => self.display_type = DisplayType::HexaDecimal,
-            (_, KeyCode::Char('l')) => self.endianness = Endianness::Little,
-            (_, KeyCode::Char('b')) => self.endianness = Endianness::Big,
+            (_, KeyCode::Char('d')) => self.file_viewer.display_type = DisplayType::Decimal,
+            (_, KeyCode::Char('x')) => self.file_viewer.display_type = DisplayType::HexaDecimal,
+            (_, KeyCode::Char('l')) => self.file_viewer.endianness = Endianness::Little,
+            (_, KeyCode::Char('b')) => self.file_viewer.endianness = Endianness::Big,
             (KeyModifiers::CONTROL, KeyCode::Char('t')) => {
                 self.action_mode = ActionMode::SelectDataType(None)
             }
@@ -130,14 +75,16 @@ impl ViewerState {
         use KeyCode::Char;
         if let ActionMode::SelectDataType(Some(x)) = self.action_mode {
             match (x, key.code) {
-                (Char('u'), Char('2')) => self.data_type = DataType::U32,
-                (Char('i'), Char('2')) => self.data_type = DataType::I32,
-                (Char('u'), Char('6')) => self.data_type = DataType::U16,
-                (Char('i'), Char('6')) => self.data_type = DataType::I16,
-                (Char('u'), Char('8')) => self.data_type = DataType::U8,
-                (Char('i'), Char('8')) => self.data_type = DataType::I8,
-                (Char('f'), Char('2')) => self.data_type = DataType::F32,
-                (Char('f'), Char('6')) => self.data_type = DataType::F16,
+                (Char('u'), Char('1')) => self.file_viewer.data_type = DataType::U8,
+                (Char('i'), Char('1')) => self.file_viewer.data_type = DataType::I8,
+                (Char('u'), Char('2')) => self.file_viewer.data_type = DataType::U16,
+                (Char('i'), Char('2')) => self.file_viewer.data_type = DataType::I16,
+                (Char('u'), Char('3')) => self.file_viewer.data_type = DataType::U32,
+                (Char('i'), Char('3')) => self.file_viewer.data_type = DataType::I32,
+                (Char('u'), Char('4')) => self.file_viewer.data_type = DataType::U64,
+                (Char('i'), Char('4')) => self.file_viewer.data_type = DataType::I64,
+                (Char('f'), Char('1')) => self.file_viewer.data_type = DataType::F32,
+                (Char('f'), Char('2')) => self.file_viewer.data_type = DataType::F64,
                 _ => self.action_mode = ActionMode::Normal,
             }
             self.action_mode = ActionMode::Normal;
@@ -166,7 +113,7 @@ impl ViewerState {
         self.render_search_bar(layout[1], frame);
 
         let layout = Layout::horizontal([
-            Constraint::Length(72),
+            Constraint::Length(88),
             Constraint::Length(32),
             Constraint::Length(23),
         ])
@@ -177,7 +124,10 @@ impl ViewerState {
         self.render_display_buttons(layout[1], frame);
         self.render_endianness_buttons(layout[2], frame);
 
-        frame.render_widget(&self.inner, page_layout[2]);
+        frame.render_widget(&self.file_viewer, page_layout[2]);
+
+        let content = fs::read(&self.file)?;
+        self.file_viewer.set_content(content);
         Ok(())
     }
 
@@ -187,30 +137,25 @@ impl ViewerState {
             .border_type(BorderType::Rounded)
             .borders(Borders::ALL)
             .title(Line::from(" File "));
+
+        let fg = Color::LightYellow;
+        let bg = Color::Blue;
         frame.render_widget(b, rect);
         let (file_comp_n, file_name_3comp) = last_n_components(&self.file, 3);
-        let mut file_name = Line::from(Span::styled(" ", Style::default().bg(Color::Gray)));
+        let mut file_name = Line::from(Span::styled(" ", Style::default().bg(bg)));
         if file_comp_n > 3 {
             file_name.push_span(Span::styled(
                 ".../",
-                Style::default()
-                    .fg(Color::LightBlue)
-                    .bg(Color::Gray)
-                    .bold()
-                    .italic(),
+                Style::default().fg(fg).bg(bg).bold().italic(),
             ));
         }
 
         file_name.extend(vec![
             Span::styled(
                 file_name_3comp.to_str().unwrap(),
-                Style::default()
-                    .fg(Color::LightBlue)
-                    .bg(Color::Gray)
-                    .bold()
-                    .italic(),
+                Style::default().fg(fg).bg(bg).bold().italic(),
             ),
-            Span::styled(" ", Style::default().bg(Color::Gray)),
+            Span::styled(" ", Style::default().bg(bg)),
         ]);
         frame.render_widget(
             file_name,
@@ -244,7 +189,7 @@ impl ViewerState {
             .vertical_margin(1)
             .horizontal_margin(2)
             .split(rect);
-        let (btn1, btn2) = match self.display_type {
+        let (btn1, btn2) = match self.file_viewer.display_type {
             DisplayType::Decimal => (
                 render_button("Decimal".to_string(), Color::Green, Color::Black),
                 render_button("HexaDecimal".to_string(), Color::Yellow, Color::Black),
@@ -272,7 +217,7 @@ impl ViewerState {
             .vertical_margin(1)
             .horizontal_margin(2)
             .split(rect);
-        let (btn1, btn2) = match self.endianness {
+        let (btn1, btn2) = match self.file_viewer.endianness {
             Endianness::Little => (
                 render_button("Little".to_string(), Color::Green, Color::Black),
                 render_button("Big".to_string(), Color::Yellow, Color::Black),
@@ -304,6 +249,8 @@ impl ViewerState {
             Length(7),
             Length(7),
             Length(7),
+            Length(7),
+            Length(7),
         ])
         .flex(Flex::SpaceBetween)
         .vertical_margin(1)
@@ -311,7 +258,7 @@ impl ViewerState {
         .split(rect);
 
         for (i, val) in DataType::ALL.iter().enumerate() {
-            let btn = if &self.data_type == val {
+            let btn = if &self.file_viewer.data_type == val {
                 render_button(val.to_string(), Color::Green, Color::Black)
             } else {
                 render_button(val.to_string(), Color::Yellow, Color::Black)

@@ -1,7 +1,14 @@
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
 use file_picker::{FilePickerEvent, FilePickerState};
-use ratatui::{DefaultTerminal, Frame};
+use ratatui::{DefaultTerminal, Frame, layout::Layout};
+use std::{fs::File, num::NonZeroUsize};
+
+#[cfg(debug_assertions)]
+use tracing::{Level, info, instrument};
+#[cfg(debug_assertions)]
+use tracing_appender::non_blocking::WorkerGuard;
+
 use viewer::{ViewerEvent, ViewerState};
 
 mod file_picker;
@@ -10,9 +17,19 @@ mod viewer;
 
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
+
+    #[cfg(debug_assertions)]
+    let _guard = init_tracing()?;
+
+    #[cfg(debug_assertions)]
+    info!("Starting hexer");
+
     let terminal = ratatui::init();
     let result = App::new().run(terminal);
     ratatui::restore();
+
+    #[cfg(debug_assertions)]
+    info!("Exiting hexer");
     result
 }
 
@@ -52,7 +69,12 @@ impl App {
         Ok(())
     }
 
+    #[cfg_attr(debug_assertions, instrument(skip_all, name = "App::render"))]
     fn render(&mut self, frame: &mut Frame) {
+        Layout::init_cache(NonZeroUsize::new(1000).unwrap());
+        #[cfg(debug_assertions)]
+        info!("Rendering app");
+
         match self.window {
             Window::FilePicker(ref mut state) => {
                 if let Err(err) = state.render_file_picker(frame) {
@@ -100,4 +122,24 @@ impl App {
     fn quit(&mut self) {
         self.running = false;
     }
+}
+
+#[cfg(debug_assertions)]
+fn init_tracing() -> Result<WorkerGuard> {
+    use tracing_appender::non_blocking;
+    use tracing_subscriber::EnvFilter;
+    let file = File::create("tracing.log")?;
+    let (non_blocking, guard) = non_blocking(file);
+
+    // By default, the subscriber is configured to log all events with a level of `DEBUG` or higher,
+    // but this can be changed by setting the `RUST_LOG` environment variable.
+    let env_filter = EnvFilter::builder()
+        .with_default_directive(Level::DEBUG.into())
+        .from_env_lossy();
+
+    tracing_subscriber::fmt()
+        .with_writer(non_blocking)
+        .with_env_filter(env_filter)
+        .init();
+    Ok(guard)
 }
