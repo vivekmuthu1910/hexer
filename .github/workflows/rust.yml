@@ -48,12 +48,74 @@ jobs:
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
   build:
-    name: build release
+    name: Build for ${{ matrix.target }}
     runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: linux
+            ext: ""
+          - target: aarch64-unknown-linux-gnu
+            os: linux
+            ext: ""
+          - target: x86_64-pc-windows-gnu
+            os: windows
+            ext: ".exe"
+
     steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --release --verbose
+      - uses: actions/checkout@v4
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
+
+      - name: Install dependencies for aarch64
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build
+        run: |
+          cargo build --release --target=${{ matrix.target }}
+
+      - name: Rename Binary
+        run: |
+          BIN_NAME=myapp
+          SUFFIX="${{ matrix.target }}"
+          EXT="${{ matrix.ext }}"
+          cp target/${{ matrix.target }}/release/$BIN_NAME $BIN_NAME-$SUFFIX$EXT
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: myapp-*
+
+  release:
+    name: Release Binaries
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: binaries
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: binaries/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   # doc:
   #   # run docs generation on nightly rather than stable. This enables features like
   #   # https://doc.rust-lang.org/beta/unstable-book/language-features/doc-cfg.html which allows an
