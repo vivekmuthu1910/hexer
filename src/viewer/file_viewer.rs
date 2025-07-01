@@ -1,6 +1,7 @@
 use super::common_dt::{DataType, DisplayType, Endianness};
 use crate::utils::previous_power_of_two;
 use bytemuck::{AnyBitPattern, cast_slice};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use num_traits::Float;
 use ratatui::prelude::{Buffer, Rect};
 use ratatui::style::{Color, Style, Stylize};
@@ -20,12 +21,14 @@ const SUB_16: &'static str = "\u{2081}\u{2086}";
 
 #[derive(Debug, Default)]
 pub struct FileViewer {
-    // cols: Option<u16>,
-    // rows: Option<u16>,
-    content: Vec<u8>,
     pub(super) data_type: DataType,
     pub(super) display_type: DisplayType,
     pub(super) endianness: Endianness,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    row_offset: usize,
+    col_offset: usize,
+    content: Vec<u8>,
 }
 
 impl Widget for &FileViewer {
@@ -33,20 +36,24 @@ impl Widget for &FileViewer {
         debug_assertions,
         instrument(skip(self, buf), name = "FileViewer::render")
     )]
-    fn render(self, area: Rect, buf: &mut Buffer)
-    where
-        Self: Sized,
-    {
-        let (cols, data_size) = self.calc_cols(area);
-        let areas = simple_layout_solver(area, cols, 1, data_size);
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let (cols, data_width, data_size) = self.calc_cols(area);
+        let areas = simple_layout_solver(area, cols, 1, data_width);
 
         #[cfg(debug_assertions)]
         info!(?areas);
 
         let rows = area.height - 2;
 
-        self.render_header(cols, data_size, &areas[..], buf);
-        self.render_data(0, 0, rows, cols, &areas[..], buf);
+        self.render_header(cols, data_width, &areas[..], buf);
+        self.render_data(
+            self.row_offset,
+            self.col_offset,
+            rows as usize,
+            cols as usize,
+            &areas[..],
+            buf,
+        );
     }
 }
 
@@ -86,10 +93,10 @@ impl FileViewer {
     )]
     fn render_data(
         &self,
-        row_offset: u16,
-        col_offset: u16,
-        rows: u16,
-        cols: u16,
+        row_offset: usize,
+        col_offset: usize,
+        rows: usize,
+        cols: usize,
         areas: &[Rect],
         buf: &mut Buffer,
     ) {
@@ -129,10 +136,10 @@ impl FileViewer {
 
     fn render_int_data<T>(
         &self,
-        row_offset: u16,
-        col_offset: u16,
-        rows: u16,
-        cols: u16,
+        row_offset: usize,
+        col_offset: usize,
+        rows: usize,
+        cols: usize,
         areas: &[Rect],
         buf: &mut Buffer,
     ) where
@@ -147,7 +154,7 @@ impl FileViewer {
             y += 1;
             let mut area = areas[0];
             area.y = y;
-            Paragraph::new(format!(" {:08X} ", row as u32 * cols as u32))
+            Paragraph::new(format!(" {:08X} ", row * cols))
                 .block(
                     Block::default()
                         .borders(Borders::RIGHT | Borders::LEFT)
@@ -156,7 +163,7 @@ impl FileViewer {
                 )
                 .style(Style::default().fg(fg).bold())
                 .render(area, buf);
-            area = areas[cols as usize + 1];
+            area = areas[cols + 1];
             area.y = y;
             Block::default()
                 .borders(Borders::RIGHT)
@@ -164,36 +171,36 @@ impl FileViewer {
                 .fg(fg)
                 .render(area, buf);
             for col in col_offset..(cols + col_offset) {
-                area = areas[(col - col_offset) as usize + 1];
+                area = areas[(col - col_offset) + 1];
                 area.y = y;
 
-                if (row as u32 * cols as u32 + col as u32) as usize >= content_len {
+                if (row * cols + col) >= content_len {
                     break 'outer_loop;
                 }
                 match self.display_type {
                     DisplayType::Decimal => {
-                        Paragraph::new(format!("{}{SUB_10}", content[(row * cols + col) as usize]))
+                        Paragraph::new(format!("{}{SUB_10}", content[row * cols + col]))
                             .right_aligned()
                             .style(Style::default().fg(Color::Yellow))
                             .render(area, buf)
                     }
-                    DisplayType::HexaDecimal => Paragraph::new(format!(
-                        "{:X}{SUB_16}",
-                        content[(row * cols + col) as usize]
-                    ))
-                    .right_aligned()
-                    .style(Style::default().fg(Color::Yellow))
-                    .render(area, buf),
+                    DisplayType::HexaDecimal => {
+                        Paragraph::new(format!("{:X}{SUB_16}", content[row * cols + col]))
+                            .right_aligned()
+                            .style(Style::default().fg(Color::Yellow))
+                            .render(area, buf)
+                    }
                 }
             }
         }
     }
+
     fn render_float_data<T, const PREC: usize>(
         &self,
-        row_offset: u16,
-        col_offset: u16,
-        rows: u16,
-        cols: u16,
+        row_offset: usize,
+        col_offset: usize,
+        rows: usize,
+        cols: usize,
         areas: &[Rect],
         buf: &mut Buffer,
     ) where
@@ -207,7 +214,7 @@ impl FileViewer {
             y += 1;
             let mut area = areas[0];
             area.y = y;
-            Paragraph::new(format!(" {:08X} ", row as u32 * cols as u32))
+            Paragraph::new(format!(" {:08X} ", row * cols))
                 .block(
                     Block::default()
                         .borders(Borders::RIGHT | Borders::LEFT)
@@ -216,7 +223,7 @@ impl FileViewer {
                 )
                 .style(Style::default().fg(fg).bold())
                 .render(area, buf);
-            area = areas[cols as usize + 1];
+            area = areas[cols + 1];
             area.y = y;
             Block::default()
                 .borders(Borders::RIGHT)
@@ -224,21 +231,27 @@ impl FileViewer {
                 .fg(fg)
                 .render(area, buf);
             for col in col_offset..(cols + col_offset) {
-                area = areas[(col - col_offset) as usize + 1];
+                area = areas[(col - col_offset) + 1];
                 area.y = y;
 
-                if (row as u32 * cols as u32 + col as u32) as usize >= content_len {
+                if (row * cols + col) >= content_len {
                     break 'outer_loop;
                 }
 
-                Paragraph::new(format_scientific_unicode(
-                    content[(row * cols + col) as usize],
-                    PREC,
-                ))
-                .right_aligned()
-                .style(Style::default().fg(Color::Yellow))
-                .render(area, buf);
+                Paragraph::new(format_scientific_unicode(content[row * cols + col], PREC))
+                    .right_aligned()
+                    .style(Style::default().fg(Color::Yellow))
+                    .render(area, buf);
             }
+        }
+    }
+
+    pub fn handle_event(&mut self, key: KeyEvent) {
+        match (key.modifiers, key.code) {
+            (_, KeyCode::Char('j') | KeyCode::Down) => {
+                self.row_offset += 1;
+            }
+            _ => {}
         }
     }
 
@@ -246,38 +259,38 @@ impl FileViewer {
         debug_assertions,
         instrument(skip(self), name = "FileViewer::calc_cols")
     )]
-    fn calc_cols(&self, area: Rect) -> (u16, u16) {
+    fn calc_cols(&self, area: Rect) -> (u16, u16, u8) {
         let address_size = 8 + 3 + 1; // 32bit address + 1 margin + 1 sep + 1 space
         use DataType::*;
         use DisplayType::*;
-        let mut data_size = match (&self.data_type, &self.display_type) {
-            (U8, Decimal) => 3,
-            (I8, Decimal) => 4,
-            (U16, Decimal) => 5,
-            (I16, Decimal) => 6,
-            (U32, Decimal) => 10,
-            (I32, Decimal) => 11,
-            (U64, Decimal) => 20,
-            (I64, Decimal) => 20,
-            (U8, HexaDecimal) => 2,
-            (I8, HexaDecimal) => 2,
-            (U16, HexaDecimal) => 4,
-            (I16, HexaDecimal) => 4,
-            (U32, HexaDecimal) => 8,
-            (I32, HexaDecimal) => 8,
-            (U64, HexaDecimal) => 16,
-            (I64, HexaDecimal) => 16,
-            (F32, Decimal) => 14,
-            (F64, Decimal) => 23,
-            (F32, HexaDecimal) => 4,
-            (F64, HexaDecimal) => 8,
+        let (mut data_width, data_size) = match (&self.data_type, &self.display_type) {
+            (U8, Decimal) => (3u16, 1u8),
+            (I8, Decimal) => (4, 1),
+            (U16, Decimal) => (5, 2),
+            (I16, Decimal) => (6, 2),
+            (U32, Decimal) => (10, 4),
+            (I32, Decimal) => (11, 4),
+            (U64, Decimal) => (20, 8),
+            (I64, Decimal) => (20, 8),
+            (U8, HexaDecimal) => (2, 1),
+            (I8, HexaDecimal) => (2, 1),
+            (U16, HexaDecimal) => (4, 2),
+            (I16, HexaDecimal) => (4, 2),
+            (U32, HexaDecimal) => (8, 4),
+            (I32, HexaDecimal) => (8, 4),
+            (U64, HexaDecimal) => (16, 8),
+            (I64, HexaDecimal) => (16, 8),
+            (F32, Decimal) => (14, 4),
+            (F64, Decimal) => (23, 8),
+            (F32, HexaDecimal) => (4, 4),
+            (F64, HexaDecimal) => (8, 8),
         };
-        data_size += 2 + 1; // 2 is for base + 1 for spacing
-        let num_cols = (area.width - address_size - 2) / data_size as u16;
+        data_width += 2 + 1; // 2 is for base + 1 for spacing
+        let num_cols = (area.width - address_size - 2) / data_width;
         #[cfg(debug_assertions)]
-        info!(num_cols, data_size);
+        info!(num_cols, data_width);
 
-        (previous_power_of_two(num_cols), data_size as u16)
+        (previous_power_of_two(num_cols), data_width, data_size)
     }
 }
 
@@ -349,6 +362,18 @@ where
 {
     if val == T::zero() {
         return format!("{:.*}×10{}", precision, val, '⁰');
+    }
+
+    if val.is_nan() {
+        return String::from("NAN");
+    }
+
+    if val.is_infinite() {
+        if val.is_sign_negative() {
+            return String::from("-∞");
+        } else {
+            return String::from("∞");
+        }
     }
 
     let sci = format!("{:.*e}", precision, val); // e.g. "1.23e+4"

@@ -2,3 +2,4 @@
 .direnv
 .envrc
 tracing.log
+test-data

@@ -72,7 +72,9 @@ impl ViewerContainer {
             (KeyModifiers::CONTROL, KeyCode::Char('f')) => {
                 return ViewerContainerEvent::SelectFile(self.file.parent().unwrap().to_owned());
             }
-            _ => {}
+            _ => {
+                self.file_viewer.handle_event(key);
+            }
         }
         ViewerContainerEvent::Poll
     }
