@@ -1,15 +1,13 @@
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
 use file_picker::{FilePickerEvent, FilePickerState};
-use ratatui::{DefaultTerminal, Frame, layout::Layout};
-use std::num::NonZeroUsize;
+use ratatui::{DefaultTerminal, Frame};
+use viewer::{ViewerContainer, ViewerContainerEvent};
 
 #[cfg(debug_assertions)]
 use tracing::{Level, info, instrument};
 #[cfg(debug_assertions)]
 use tracing_appender::non_blocking::WorkerGuard;
-
-use viewer::{ViewerContainer, ViewerContainerEvent};
 
 mod file_picker;
 mod utils;
@@ -45,21 +43,17 @@ impl Default for Window {
     }
 }
 
-/// The main application which holds the state and logic of the application.
 #[derive(Debug, Default)]
 pub struct App {
-    /// Is the application running?
     window: Window,
     running: bool,
 }
 
 impl App {
-    /// Construct a new instance of [`App`].
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Run the application's main loop.
     pub fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
         self.running = true;
         while self.running {
@@ -71,7 +65,6 @@ impl App {
 
     #[cfg_attr(debug_assertions, instrument(skip_all, name = "App::render"))]
     fn render(&mut self, frame: &mut Frame) {
-        Layout::init_cache(NonZeroUsize::new(1000).unwrap());
         #[cfg(debug_assertions)]
         info!("Rendering app");
 
@@ -102,25 +95,24 @@ impl App {
         Ok(())
     }
 
-    /// Handles the key events and updates the state of [`App`].
     #[cfg_attr(debug_assertions, instrument(skip_all, name = "App::on_key_event"))]
     fn on_key_event(&mut self, key: KeyEvent) {
         match self.window {
             Window::FilePicker(ref mut state) => match state.handle_key(key) {
                 FilePickerEvent::Quit => self.quit(),
-                FilePickerEvent::Poll => {}
                 FilePickerEvent::SelectedFile(f) => {
                     self.window = Window::HexViewer(ViewerContainer::default().with_file(f))
                 }
+                FilePickerEvent::Poll => {}
             },
             Window::HexViewer(ref mut viewer_container) => match viewer_container.handle_key(key) {
                 ViewerContainerEvent::Quit => self.quit(),
-                ViewerContainerEvent::Poll => {}
                 ViewerContainerEvent::SelectFile(f) => {
                     #[cfg(debug_assertions)]
                     info!("Changing back to file picker mode: {f:?}");
                     self.window = Window::FilePicker(FilePickerState::default().with_cwd(f));
                 }
+                ViewerContainerEvent::Poll => {}
             },
         };
     }

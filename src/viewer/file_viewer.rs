@@ -159,9 +159,10 @@ impl StatefulWidget for &FileViewer {
             buf,
         );
 
-        if state.scrollbar.is_none() {
-            state.scrollbar = Some(ScrollbarState::new(state.total_rows));
-        }
+        state.scrollbar = Some(match state.scrollbar {
+            Some(scroll) => scroll.content_length(state.total_rows),
+            None => ScrollbarState::new(state.total_rows),
+        });
 
         let mut scrollbar_area = areas[state.cols + 1];
         scrollbar_area.height = state.rows as u16 + 1;
