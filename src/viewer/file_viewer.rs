@@ -4,7 +4,10 @@ use bytemuck::{AnyBitPattern, cast_slice};
 use num_traits::Float;
 use ratatui::prelude::{Buffer, Rect};
 use ratatui::style::{Color, Style, Stylize};
-use ratatui::widgets::{Block, Borders, Paragraph, StatefulWidget, Widget};
+use ratatui::widgets::{
+    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget,
+    Widget,
+};
 use std::fmt::{Display, LowerExp, UpperHex};
 
 #[cfg(debug_assertions)]
@@ -34,6 +37,7 @@ pub struct FileViewerState {
     rows: usize,
     total_rows: usize,
     set_cols: Option<usize>,
+    scrollbar: Option<ScrollbarState>,
 }
 
 impl FileViewerState {
@@ -41,6 +45,9 @@ impl FileViewerState {
         if self.total_rows > self.rows {
             if self.row_offset < (self.total_rows - self.rows) {
                 self.row_offset += 1;
+                if let Some(ref mut scrollbar_state) = self.scrollbar {
+                    scrollbar_state.next();
+                }
             }
         }
     }
@@ -48,6 +55,9 @@ impl FileViewerState {
     pub fn move_up(&mut self) {
         if self.row_offset > 0 {
             self.row_offset -= 1;
+            if let Some(ref mut scrollbar_state) = self.scrollbar {
+                scrollbar_state.prev();
+            }
         }
     }
 
@@ -77,10 +87,16 @@ impl FileViewerState {
 
     pub fn goto_top(&mut self) {
         self.row_offset = 0;
+        if let Some(ref mut scrollbar_state) = self.scrollbar {
+            scrollbar_state.first();
+        }
     }
     pub fn goto_bottom(&mut self) {
         if self.total_rows > self.rows {
             self.row_offset = self.total_rows - self.rows;
+        }
+        if let Some(ref mut scrollbar_state) = self.scrollbar {
+            scrollbar_state.last();
         }
     }
     pub fn goto_start(&mut self) {
@@ -101,16 +117,28 @@ impl FileViewerState {
         if self.total_rows > self.rows * 3 / 2 {
             if self.row_offset < (self.total_rows - self.rows - self.rows / 2) {
                 self.row_offset += self.rows / 2;
+                if let Some(scroll) = self.scrollbar {
+                    self.scrollbar = Some(scroll.position(self.row_offset));
+                }
             } else {
                 self.row_offset = self.total_rows - self.rows;
+                if let Some(ref mut scrollbar_state) = self.scrollbar {
+                    scrollbar_state.last();
+                }
             }
         }
     }
     pub fn scroll_up(&mut self) {
         if self.row_offset > self.rows / 2 {
             self.row_offset -= self.rows / 2;
+            if let Some(scroll) = self.scrollbar {
+                self.scrollbar = Some(scroll.position(self.row_offset));
+            }
         } else {
             self.row_offset = 0;
+            if let Some(ref mut scrollbar_state) = self.scrollbar {
+                scrollbar_state.first();
+            }
         }
     }
 }
@@ -145,6 +173,18 @@ impl StatefulWidget for &FileViewer {
             &areas[..],
             buf,
         );
+
+        if let None = state.scrollbar {
+            state.scrollbar = Some(ScrollbarState::new(state.total_rows));
+        }
+
+        let mut scrollbar_area = areas[state.cols + 1];
+        scrollbar_area.height = state.rows as u16 + 1;
+
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(Some("↑"))
+            .end_symbol(Some("↓"));
+        scrollbar.render(scrollbar_area, buf, &mut state.scrollbar.unwrap());
     }
 }
 
