@@ -85,7 +85,7 @@ jobs:
 
       - name: Rename Binary
         run: |
-          BIN_NAME=myapp
+          BIN_NAME=hexer
           SUFFIX="${{ matrix.target }}"
           EXT="${{ matrix.ext }}"
           cp target/${{ matrix.target }}/release/$BIN_NAME $BIN_NAME-$SUFFIX$EXT
@@ -94,7 +94,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: binaries
-          path: myapp-*
+          path: hexer-*
 
   release:
     name: Release Binaries
