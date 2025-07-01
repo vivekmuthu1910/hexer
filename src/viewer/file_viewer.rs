@@ -18,8 +18,8 @@ const SUPER_NUMS: [char; 10] = [
     '\u{2078}', '\u{2079}',
 ];
 const SUPER_MINUS: char = '\u{207B}';
-const SUB_10: &'static str = "\u{2081}\u{2080}";
-const SUB_16: &'static str = "\u{2081}\u{2086}";
+const SUB_10: &str = "\u{2081}\u{2080}";
+const SUB_16: &str = "\u{2081}\u{2086}";
 
 #[derive(Debug, Default)]
 pub struct FileViewer {
@@ -42,12 +42,10 @@ pub struct FileViewerState {
 
 impl FileViewerState {
     pub fn move_down(&mut self) {
-        if self.total_rows > self.rows {
-            if self.row_offset < (self.total_rows - self.rows) {
-                self.row_offset += 1;
-                if let Some(ref mut scrollbar_state) = self.scrollbar {
-                    scrollbar_state.next();
-                }
+        if self.total_rows > self.rows && self.row_offset < (self.total_rows - self.rows) {
+            self.row_offset += 1;
+            if let Some(ref mut scrollbar_state) = self.scrollbar {
+                scrollbar_state.next();
             }
         }
     }
@@ -62,26 +60,16 @@ impl FileViewerState {
     }
 
     pub fn move_right(&mut self) {
-        match self.set_cols {
-            Some(col) => {
-                if col > self.cols {
-                    if self.col_offset < (col - self.cols) {
-                        self.col_offset += 1;
-                    }
-                }
+        if let Some(col) = self.set_cols {
+            if col > self.cols && self.col_offset < (col - self.cols) {
+                self.col_offset += 1;
             }
-            None => {}
         }
     }
 
     pub fn move_left(&mut self) {
-        match self.set_cols {
-            Some(_) => {
-                if self.col_offset > 0 {
-                    self.col_offset -= 1;
-                }
-            }
-            None => {}
+        if self.set_cols.is_some() && self.col_offset > 0 {
+            self.col_offset -= 1;
         }
     }
 
@@ -103,13 +91,10 @@ impl FileViewerState {
         self.col_offset = 0;
     }
     pub fn goto_end(&mut self) {
-        match self.set_cols {
-            Some(col) => {
-                if col > self.cols {
-                    self.col_offset = col - self.cols;
-                }
+        if let Some(col) = self.set_cols {
+            if col > self.cols {
+                self.col_offset = col - self.cols;
             }
-            None => {}
         }
     }
 
@@ -174,7 +159,7 @@ impl StatefulWidget for &FileViewer {
             buf,
         );
 
-        if let None = state.scrollbar {
+        if state.scrollbar.is_none() {
             state.scrollbar = Some(ScrollbarState::new(state.total_rows));
         }
 
@@ -456,7 +441,7 @@ fn simple_layout_solver(area: Rect, cols: u16, rows: u16, data_size: u16) -> Vec
     info!(x);
 
     rects.push(Rect {
-        x: x,
+        x,
         y,
         width: total_address_size,
         height: 1,
