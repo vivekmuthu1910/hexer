@@ -9,6 +9,8 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Paragraph, Widget},
 };
 use std::{fs, io::Result, path::PathBuf};
+#[cfg(debug_assertions)]
+use tracing::{info, instrument};
 
 mod common_dt;
 mod file_viewer;
@@ -16,16 +18,17 @@ mod file_viewer;
 use common_dt::{DataType, DisplayType, Endianness};
 
 #[derive(Debug, Default)]
-pub struct ViewerState {
+pub struct ViewerContainer {
     file: PathBuf,
     action_mode: ActionMode,
     file_viewer: FileViewer,
     // search_field: String,
 }
 
-pub enum ViewerEvent {
+pub enum ViewerContainerEvent {
     Quit,
     Poll,
+    SelectFile(PathBuf),
 }
 
 #[derive(Debug, Default)]
@@ -40,24 +43,24 @@ fn render_button(name: String, btn_color: Color, text_color: Color) -> impl Widg
     Paragraph::new(name).fg(text_color).bg(btn_color).centered()
 }
 
-impl ViewerState {
+impl ViewerContainer {
     pub fn with_file(mut self, file: PathBuf) -> Self {
         self.file = file;
         self
     }
 
-    pub fn handle_key(&mut self, key: KeyEvent) -> ViewerEvent {
+    pub fn handle_key(&mut self, key: KeyEvent) -> ViewerContainerEvent {
         match self.action_mode {
             ActionMode::Normal => self.handle_normal_keys(key),
             ActionMode::SelectDataType(_) => self.handle_dt_keys(key),
         }
     }
 
-    fn handle_normal_keys(&mut self, key: KeyEvent) -> ViewerEvent {
+    fn handle_normal_keys(&mut self, key: KeyEvent) -> ViewerContainerEvent {
         match (key.modifiers, key.code) {
             (_, KeyCode::Esc | KeyCode::Char('q'))
             | (KeyModifiers::CONTROL, KeyCode::Char('c') | KeyCode::Char('C')) => {
-                return ViewerEvent::Quit;
+                return ViewerContainerEvent::Quit;
             }
             (_, KeyCode::Char('d')) => self.file_viewer.display_type = DisplayType::Decimal,
             (_, KeyCode::Char('x')) => self.file_viewer.display_type = DisplayType::HexaDecimal,
@@ -66,12 +69,15 @@ impl ViewerState {
             (KeyModifiers::CONTROL, KeyCode::Char('t')) => {
                 self.action_mode = ActionMode::SelectDataType(None)
             }
+            (KeyModifiers::CONTROL, KeyCode::Char('f')) => {
+                return ViewerContainerEvent::SelectFile(self.file.parent().unwrap().to_owned());
+            }
             _ => {}
         }
-        ViewerEvent::Poll
+        ViewerContainerEvent::Poll
     }
 
-    fn handle_dt_keys(&mut self, key: KeyEvent) -> ViewerEvent {
+    fn handle_dt_keys(&mut self, key: KeyEvent) -> ViewerContainerEvent {
         use KeyCode::Char;
         if let ActionMode::SelectDataType(Some(x)) = self.action_mode {
             match (x, key.code) {
@@ -96,9 +102,10 @@ impl ViewerState {
                 _ => self.action_mode = ActionMode::Normal,
             }
         }
-        ViewerEvent::Poll
+        ViewerContainerEvent::Poll
     }
 
+    #[cfg_attr(debug_assertions, instrument(skip_all, name = "Viewer::render_viewer"))]
     pub fn render_viewer(&mut self, frame: &mut Frame) -> Result<()> {
         let page_layout = Layout::vertical([
             Constraint::Length(3),
@@ -124,10 +131,13 @@ impl ViewerState {
         self.render_display_buttons(layout[1], frame);
         self.render_endianness_buttons(layout[2], frame);
 
-        frame.render_widget(&self.file_viewer, page_layout[2]);
-
         let content = fs::read(&self.file)?;
+
+        #[cfg(debug_assertions)]
+        info!("Content len: {}", content.len());
+
         self.file_viewer.set_content(content);
+        frame.render_widget(&self.file_viewer, page_layout[2]);
         Ok(())
     }
 

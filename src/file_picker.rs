@@ -29,6 +29,10 @@ pub enum FilePickerEvent {
 }
 
 impl FilePickerState {
+    pub fn with_cwd(mut self, cwd: PathBuf) -> Self {
+        self.cwd = cwd;
+        self
+    }
     pub fn render_file_picker(&mut self, frame: &mut Frame) -> Result<()> {
         if !self.cwd_selected {
             self.reload_dir = true;

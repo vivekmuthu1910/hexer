@@ -13,3 +13,5 @@ color-eyre = "0.6.3"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 tracing-appender = "0.2.3"
+bytemuck = "1.23.1"
+num-traits = "0.2.19"

@@ -9,7 +9,7 @@ use tracing::{Level, info, instrument};
 #[cfg(debug_assertions)]
 use tracing_appender::non_blocking::WorkerGuard;
 
-use viewer::{ViewerEvent, ViewerState};
+use viewer::{ViewerContainer, ViewerContainerEvent};
 
 mod file_picker;
 mod utils;
@@ -36,7 +36,7 @@ fn main() -> color_eyre::Result<()> {
 #[derive(Debug)]
 enum Window {
     FilePicker(FilePickerState),
-    HexViewer(ViewerState),
+    HexViewer(ViewerContainer),
 }
 
 impl Default for Window {
@@ -103,18 +103,24 @@ impl App {
     }
 
     /// Handles the key events and updates the state of [`App`].
+    #[cfg_attr(debug_assertions, instrument(skip_all, name = "App::on_key_event"))]
     fn on_key_event(&mut self, key: KeyEvent) {
         match self.window {
             Window::FilePicker(ref mut state) => match state.handle_key(key) {
                 FilePickerEvent::Quit => self.quit(),
                 FilePickerEvent::Poll => {}
                 FilePickerEvent::SelectedFile(f) => {
-                    self.window = Window::HexViewer(ViewerState::default().with_file(f))
+                    self.window = Window::HexViewer(ViewerContainer::default().with_file(f))
                 }
             },
-            Window::HexViewer(ref mut state) => match state.handle_key(key) {
-                ViewerEvent::Quit => self.quit(),
-                ViewerEvent::Poll => {}
+            Window::HexViewer(ref mut viewer_container) => match viewer_container.handle_key(key) {
+                ViewerContainerEvent::Quit => self.quit(),
+                ViewerContainerEvent::Poll => {}
+                ViewerContainerEvent::SelectFile(f) => {
+                    #[cfg(debug_assertions)]
+                    info!("Changing back to file picker mode: {f:?}");
+                    self.window = Window::FilePicker(FilePickerState::default().with_cwd(f));
+                }
             },
         };
     }

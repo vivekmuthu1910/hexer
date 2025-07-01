@@ -47,6 +47,7 @@
 
             # other tools
             pkgs.cargo-generate
+            pkgs.hexyl
 
             # formatter
             treefmt.config.package
