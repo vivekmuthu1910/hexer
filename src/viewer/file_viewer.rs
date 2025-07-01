@@ -136,7 +136,7 @@ impl StatefulWidget for &FileViewer {
     )]
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let (cols, data_width, data_size) = self.calc_cols(area);
-        let areas = simple_layout_solver(area, cols, 1, data_width);
+        let areas = simple_layout_solver(area, cols, data_width);
 
         #[cfg(debug_assertions)]
         info!(?areas);
@@ -149,7 +149,7 @@ impl StatefulWidget for &FileViewer {
             None => self.content.len() / (data_size as usize * state.cols),
         };
 
-        self.render_header(cols, data_width, &areas[..], buf);
+        self.render_header(cols, &areas[..], buf);
         self.render_data(
             state.row_offset,
             state.col_offset,
@@ -191,7 +191,7 @@ impl FileViewer {
         debug_assertions,
         instrument(skip(self, buf), name = "FileViewer::render_header")
     )]
-    fn render_header(&self, cols: u16, data_size: u16, area: &[Rect], buf: &mut Buffer) {
+    fn render_header(&self, cols: u16, area: &[Rect], buf: &mut Buffer) {
         let fg = Color::LightCyan;
         let b = Block::default().borders(Borders::RIGHT | Borders::LEFT);
         Paragraph::new(" Address ")
@@ -411,7 +411,7 @@ impl FileViewer {
 }
 
 #[cfg_attr(debug_assertions, instrument)]
-fn simple_layout_solver(area: Rect, cols: u16, rows: u16, data_size: u16) -> Vec<Rect> {
+fn simple_layout_solver(area: Rect, cols: u16, data_size: u16) -> Vec<Rect> {
     let mut rects = vec![];
     let Rect {
         mut x,

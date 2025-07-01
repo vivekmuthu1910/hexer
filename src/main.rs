@@ -2,7 +2,7 @@ use color_eyre::Result;
 use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
 use file_picker::{FilePickerEvent, FilePickerState};
 use ratatui::{DefaultTerminal, Frame, layout::Layout};
-use std::{fs::File, num::NonZeroUsize};
+use std::num::NonZeroUsize;
 
 #[cfg(debug_assertions)]
 use tracing::{Level, info, instrument};
@@ -132,6 +132,7 @@ impl App {
 
 #[cfg(debug_assertions)]
 fn init_tracing() -> Result<WorkerGuard> {
+    use std::fs::File;
     use tracing_appender::non_blocking;
     use tracing_subscriber::EnvFilter;
     let file = File::create("tracing.log")?;
