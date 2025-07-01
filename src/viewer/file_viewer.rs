@@ -1,11 +1,10 @@
 use super::common_dt::{DataType, DisplayType, Endianness};
 use crate::utils::previous_power_of_two;
 use bytemuck::{AnyBitPattern, cast_slice};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use num_traits::Float;
 use ratatui::prelude::{Buffer, Rect};
 use ratatui::style::{Color, Style, Stylize};
-use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+use ratatui::widgets::{Block, Borders, Paragraph, StatefulWidget, Widget};
 use std::fmt::{Display, LowerExp, UpperHex};
 
 #[cfg(debug_assertions)]
@@ -21,36 +20,128 @@ const SUB_16: &'static str = "\u{2081}\u{2086}";
 
 #[derive(Debug, Default)]
 pub struct FileViewer {
-    pub(super) data_type: DataType,
-    pub(super) display_type: DisplayType,
-    pub(super) endianness: Endianness,
-    cols: Option<u16>,
-    rows: Option<u16>,
-    row_offset: usize,
-    col_offset: usize,
+    data_type: DataType,
+    display_type: DisplayType,
+    endianness: Endianness,
     content: Vec<u8>,
 }
 
-impl Widget for &FileViewer {
+#[derive(Debug, Default)]
+pub struct FileViewerState {
+    row_offset: usize,
+    col_offset: usize,
+    cols: usize,
+    rows: usize,
+    total_rows: usize,
+    set_cols: Option<usize>,
+}
+
+impl FileViewerState {
+    pub fn move_down(&mut self) {
+        if self.total_rows > self.rows {
+            if self.row_offset < (self.total_rows - self.rows) {
+                self.row_offset += 1;
+            }
+        }
+    }
+
+    pub fn move_up(&mut self) {
+        if self.row_offset > 0 {
+            self.row_offset -= 1;
+        }
+    }
+
+    pub fn move_right(&mut self) {
+        match self.set_cols {
+            Some(col) => {
+                if col > self.cols {
+                    if self.col_offset < (col - self.cols) {
+                        self.col_offset += 1;
+                    }
+                }
+            }
+            None => {}
+        }
+    }
+
+    pub fn move_left(&mut self) {
+        match self.set_cols {
+            Some(_) => {
+                if self.col_offset > 0 {
+                    self.col_offset -= 1;
+                }
+            }
+            None => {}
+        }
+    }
+
+    pub fn goto_top(&mut self) {
+        self.row_offset = 0;
+    }
+    pub fn goto_bottom(&mut self) {
+        if self.total_rows > self.rows {
+            self.row_offset = self.total_rows - self.rows;
+        }
+    }
+    pub fn goto_start(&mut self) {
+        self.col_offset = 0;
+    }
+    pub fn goto_end(&mut self) {
+        match self.set_cols {
+            Some(col) => {
+                if col > self.cols {
+                    self.col_offset = col - self.cols;
+                }
+            }
+            None => {}
+        }
+    }
+
+    pub fn scroll_down(&mut self) {
+        if self.total_rows > self.rows * 3 / 2 {
+            if self.row_offset < (self.total_rows - self.rows - self.rows / 2) {
+                self.row_offset += self.rows / 2;
+            } else {
+                self.row_offset = self.total_rows - self.rows;
+            }
+        }
+    }
+    pub fn scroll_up(&mut self) {
+        if self.row_offset > self.rows / 2 {
+            self.row_offset -= self.rows / 2;
+        } else {
+            self.row_offset = 0;
+        }
+    }
+}
+
+impl StatefulWidget for &FileViewer {
+    type State = FileViewerState;
     #[cfg_attr(
         debug_assertions,
-        instrument(skip(self, buf), name = "FileViewer::render")
+        instrument(skip(self, buf, state), name = "FileViewer::render")
     )]
-    fn render(self, area: Rect, buf: &mut Buffer) {
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let (cols, data_width, data_size) = self.calc_cols(area);
         let areas = simple_layout_solver(area, cols, 1, data_width);
 
         #[cfg(debug_assertions)]
         info!(?areas);
 
-        let rows = area.height - 2;
+        state.rows = area.height as usize - 2;
+
+        state.cols = cols as usize;
+        state.total_rows = match state.set_cols {
+            Some(col) => self.content.len() / (data_size as usize * col),
+            None => self.content.len() / (data_size as usize * state.cols),
+        };
 
         self.render_header(cols, data_width, &areas[..], buf);
         self.render_data(
-            self.row_offset,
-            self.col_offset,
-            rows as usize,
-            cols as usize,
+            state.row_offset,
+            state.col_offset,
+            state.rows,
+            state.cols,
             &areas[..],
             buf,
         );
@@ -58,8 +149,17 @@ impl Widget for &FileViewer {
 }
 
 impl FileViewer {
-    pub(super) fn set_content(&mut self, content: Vec<u8>) {
+    pub fn set_content(&mut self, content: Vec<u8>) {
         self.content = content;
+    }
+    pub fn set_display_type(&mut self, display_type: DisplayType) {
+        self.display_type = display_type;
+    }
+    pub fn set_data_type(&mut self, data_type: DataType) {
+        self.data_type = data_type;
+    }
+    pub fn set_endianness(&mut self, endianness: Endianness) {
+        self.endianness = endianness;
     }
 
     #[cfg_attr(
@@ -243,15 +343,6 @@ impl FileViewer {
                     .style(Style::default().fg(Color::Yellow))
                     .render(area, buf);
             }
-        }
-    }
-
-    pub fn handle_event(&mut self, key: KeyEvent) {
-        match (key.modifiers, key.code) {
-            (_, KeyCode::Char('j') | KeyCode::Down) => {
-                self.row_offset += 1;
-            }
-            _ => {}
         }
     }
 

@@ -1,6 +1,6 @@
 use super::utils::last_n_components;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use file_viewer::FileViewer;
+use file_viewer::{FileViewer, FileViewerState};
 use ratatui::{
     Frame,
     layout::{Constraint, Flex, Layout, Margin, Rect},
@@ -22,6 +22,10 @@ pub struct ViewerContainer {
     file: PathBuf,
     action_mode: ActionMode,
     file_viewer: FileViewer,
+    file_viewer_state: FileViewerState,
+    data_type: DataType,
+    display_type: DisplayType,
+    endianness: Endianness,
     // search_field: String,
 }
 
@@ -62,19 +66,39 @@ impl ViewerContainer {
             | (KeyModifiers::CONTROL, KeyCode::Char('c') | KeyCode::Char('C')) => {
                 return ViewerContainerEvent::Quit;
             }
-            (_, KeyCode::Char('d')) => self.file_viewer.display_type = DisplayType::Decimal,
-            (_, KeyCode::Char('x')) => self.file_viewer.display_type = DisplayType::HexaDecimal,
-            (_, KeyCode::Char('l')) => self.file_viewer.endianness = Endianness::Little,
-            (_, KeyCode::Char('b')) => self.file_viewer.endianness = Endianness::Big,
+            (_, KeyCode::Char('d')) => {
+                self.display_type = DisplayType::Decimal;
+                self.file_viewer.set_display_type(DisplayType::Decimal);
+            }
+            (_, KeyCode::Char('x')) => {
+                self.display_type = DisplayType::HexaDecimal;
+                self.file_viewer.set_display_type(DisplayType::HexaDecimal);
+            }
+            (KeyModifiers::SHIFT, KeyCode::Char('l')) => {
+                self.endianness = Endianness::Little;
+                self.file_viewer.set_endianness(Endianness::Little);
+            }
+            (KeyModifiers::SHIFT, KeyCode::Char('b')) => {
+                self.endianness = Endianness::Big;
+                self.file_viewer.set_endianness(Endianness::Big);
+            }
             (KeyModifiers::CONTROL, KeyCode::Char('t')) => {
                 self.action_mode = ActionMode::SelectDataType(None)
             }
             (KeyModifiers::CONTROL, KeyCode::Char('f')) => {
                 return ViewerContainerEvent::SelectFile(self.file.parent().unwrap().to_owned());
             }
-            _ => {
-                self.file_viewer.handle_event(key);
-            }
+            (_, KeyCode::Char('j') | KeyCode::Down) => self.file_viewer_state.move_down(),
+            (_, KeyCode::Char('k') | KeyCode::Up) => self.file_viewer_state.move_up(),
+            (_, KeyCode::Char('h') | KeyCode::Left) => self.file_viewer_state.move_left(),
+            (_, KeyCode::Char('l') | KeyCode::Right) => self.file_viewer_state.move_right(),
+            (KeyModifiers::CONTROL, KeyCode::Home) => self.file_viewer_state.goto_top(),
+            (KeyModifiers::CONTROL, KeyCode::End) => self.file_viewer_state.goto_bottom(),
+            (_, KeyCode::Home) => self.file_viewer_state.goto_start(),
+            (_, KeyCode::End) => self.file_viewer_state.goto_end(),
+            (_, KeyCode::PageUp) => self.file_viewer_state.scroll_up(),
+            (_, KeyCode::PageDown) => self.file_viewer_state.scroll_down(),
+            _ => {}
         }
         ViewerContainerEvent::Poll
     }
@@ -83,16 +107,46 @@ impl ViewerContainer {
         use KeyCode::Char;
         if let ActionMode::SelectDataType(Some(x)) = self.action_mode {
             match (x, key.code) {
-                (Char('u'), Char('1')) => self.file_viewer.data_type = DataType::U8,
-                (Char('i'), Char('1')) => self.file_viewer.data_type = DataType::I8,
-                (Char('u'), Char('2')) => self.file_viewer.data_type = DataType::U16,
-                (Char('i'), Char('2')) => self.file_viewer.data_type = DataType::I16,
-                (Char('u'), Char('3')) => self.file_viewer.data_type = DataType::U32,
-                (Char('i'), Char('3')) => self.file_viewer.data_type = DataType::I32,
-                (Char('u'), Char('4')) => self.file_viewer.data_type = DataType::U64,
-                (Char('i'), Char('4')) => self.file_viewer.data_type = DataType::I64,
-                (Char('f'), Char('1')) => self.file_viewer.data_type = DataType::F32,
-                (Char('f'), Char('2')) => self.file_viewer.data_type = DataType::F64,
+                (Char('u'), Char('1')) => {
+                    self.data_type = DataType::U8;
+                    self.file_viewer.set_data_type(DataType::U8);
+                }
+                (Char('i'), Char('1')) => {
+                    self.data_type = DataType::I8;
+                    self.file_viewer.set_data_type(DataType::I8);
+                }
+                (Char('u'), Char('2')) => {
+                    self.data_type = DataType::U16;
+                    self.file_viewer.set_data_type(DataType::U16);
+                }
+                (Char('i'), Char('2')) => {
+                    self.data_type = DataType::I16;
+                    self.file_viewer.set_data_type(DataType::I16);
+                }
+                (Char('u'), Char('3')) => {
+                    self.data_type = DataType::U32;
+                    self.file_viewer.set_data_type(DataType::U32);
+                }
+                (Char('i'), Char('3')) => {
+                    self.data_type = DataType::I32;
+                    self.file_viewer.set_data_type(DataType::I32);
+                }
+                (Char('u'), Char('4')) => {
+                    self.data_type = DataType::U64;
+                    self.file_viewer.set_data_type(DataType::U64);
+                }
+                (Char('i'), Char('4')) => {
+                    self.data_type = DataType::I64;
+                    self.file_viewer.set_data_type(DataType::I64);
+                }
+                (Char('f'), Char('1')) => {
+                    self.data_type = DataType::F32;
+                    self.file_viewer.set_data_type(DataType::F32);
+                }
+                (Char('f'), Char('2')) => {
+                    self.data_type = DataType::F64;
+                    self.file_viewer.set_data_type(DataType::F64);
+                }
                 _ => self.action_mode = ActionMode::Normal,
             }
             self.action_mode = ActionMode::Normal;
@@ -139,7 +193,11 @@ impl ViewerContainer {
         info!("Content len: {}", content.len());
 
         self.file_viewer.set_content(content);
-        frame.render_widget(&self.file_viewer, page_layout[2]);
+        frame.render_stateful_widget(
+            &self.file_viewer,
+            page_layout[2],
+            &mut self.file_viewer_state,
+        );
         Ok(())
     }
 
@@ -201,7 +259,7 @@ impl ViewerContainer {
             .vertical_margin(1)
             .horizontal_margin(2)
             .split(rect);
-        let (btn1, btn2) = match self.file_viewer.display_type {
+        let (btn1, btn2) = match self.display_type {
             DisplayType::Decimal => (
                 render_button("Decimal".to_string(), Color::Green, Color::Black),
                 render_button("HexaDecimal".to_string(), Color::Yellow, Color::Black),
@@ -229,7 +287,7 @@ impl ViewerContainer {
             .vertical_margin(1)
             .horizontal_margin(2)
             .split(rect);
-        let (btn1, btn2) = match self.file_viewer.endianness {
+        let (btn1, btn2) = match self.endianness {
             Endianness::Little => (
                 render_button("Little".to_string(), Color::Green, Color::Black),
                 render_button("Big".to_string(), Color::Yellow, Color::Black),
@@ -270,7 +328,7 @@ impl ViewerContainer {
         .split(rect);
 
         for (i, val) in DataType::ALL.iter().enumerate() {
-            let btn = if &self.file_viewer.data_type == val {
+            let btn = if &self.data_type == val {
                 render_button(val.to_string(), Color::Green, Color::Black)
             } else {
                 render_button(val.to_string(), Color::Yellow, Color::Black)
