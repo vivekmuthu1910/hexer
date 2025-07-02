@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     Frame,
     style::{Color, Style, Stylize},
@@ -6,6 +6,9 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, List, ListItem, ListState, Padding},
 };
 use std::{env, fs, io::Result, path::PathBuf};
+
+#[cfg(debug_assertions)]
+use tracing::{info, instrument};
 
 #[derive(Debug)]
 pub enum FileType {
@@ -29,8 +32,16 @@ pub enum FilePickerEvent {
 }
 
 impl FilePickerState {
+    #[cfg_attr(
+        debug_assertions,
+        instrument(skip(self), name = "FilePickerEvent::handle_mouse")
+    )]
     pub fn with_cwd(mut self, cwd: PathBuf) -> Self {
+        #[cfg(debug_assertions)]
+        info!("Changing cwd");
         self.cwd = cwd;
+        self.cwd_selected = true;
+        self.reload_dir = true;
         self
     }
     pub fn render_file_picker(&mut self, frame: &mut Frame) -> Result<()> {
@@ -98,13 +109,20 @@ impl FilePickerState {
             | (KeyModifiers::CONTROL, KeyCode::Char('c') | KeyCode::Char('C')) => {
                 return FilePickerEvent::Quit;
             }
-            (_, KeyCode::Char('j') | KeyCode::Down) => self.list_state.select_next(),
-            (_, KeyCode::Char('k') | KeyCode::Up) => self.list_state.select_previous(),
+            (_, KeyCode::Char('j') | KeyCode::Down) => {
+                self.list_state.select_next();
+                FilePickerEvent::Poll
+            }
+            (_, KeyCode::Char('k') | KeyCode::Up) => {
+                self.list_state.select_previous();
+                FilePickerEvent::Poll
+            }
             (_, KeyCode::Char('h') | KeyCode::Left) => {
                 if let Some(parent) = self.cwd.parent() {
                     self.cwd = parent.to_path_buf();
                     self.reload_dir = true;
                 }
+                FilePickerEvent::Poll
             }
             (_, KeyCode::Enter) => {
                 let selected = &mut self.files[self.list_state.selected().unwrap()];
@@ -112,16 +130,34 @@ impl FilePickerState {
                     FileType::Dir(d) => {
                         self.cwd = self.cwd.join(d.as_str());
                         self.reload_dir = true;
+                        FilePickerEvent::Poll
                     }
                     FileType::File(f) => {
                         let result = FilePickerEvent::SelectedFile(self.cwd.join(f));
                         self.files.clear();
-                        return result;
+                        result
                     }
                 }
             }
-            _ => {}
+            _ => FilePickerEvent::Poll,
         }
-        FilePickerEvent::Poll
+    }
+
+    #[cfg_attr(
+        debug_assertions,
+        instrument(skip_all, name = "FilePickerEvent::handle_mouse")
+    )]
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) -> FilePickerEvent {
+        match mouse.kind {
+            MouseEventKind::Up(MouseButton::Left) => {
+                let row = mouse.row as usize;
+                if row > 1 && row < self.files.len() + 2 {
+                    self.list_state
+                        .select(Some(row - 2 + self.list_state.offset()));
+                }
+                FilePickerEvent::Poll
+            }
+            _ => FilePickerEvent::Poll,
+        }
     }
 }

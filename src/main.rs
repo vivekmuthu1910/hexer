@@ -1,5 +1,11 @@
+use std::io::stdout;
+
 use color_eyre::Result;
-use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEvent, KeyEventKind, MouseEvent,
+    MouseEventKind,
+};
+use crossterm::execute;
 use file_picker::{FilePickerEvent, FilePickerState};
 use ratatui::{DefaultTerminal, Frame};
 use viewer::{ViewerContainer, ViewerContainerEvent};
@@ -23,7 +29,9 @@ fn main() -> color_eyre::Result<()> {
     info!("Starting hexer");
 
     let terminal = ratatui::init();
+    execute!(stdout(), EnableMouseCapture)?;
     let result = App::new().run(terminal);
+    execute!(stdout(), DisableMouseCapture)?;
     ratatui::restore();
 
     #[cfg(debug_assertions)]
@@ -71,13 +79,13 @@ impl App {
         match self.window {
             Window::FilePicker(ref mut state) => {
                 if let Err(err) = state.render_file_picker(frame) {
-                    eprintln!("Error occured while selecting file {:?}", err);
+                    eprintln!("Error occured while selecting file {err:?}");
                     self.running = false;
                 }
             }
             Window::HexViewer(ref mut state) => {
                 if let Err(err) = state.render_viewer(frame) {
-                    eprintln!("Error occured while selecting file {:?}", err);
+                    eprintln!("Error occured while opening file {err:?}");
                     self.running = false;
                 }
             }
@@ -88,8 +96,14 @@ impl App {
         match event::read()? {
             // it's important to check KeyEventKind::Press to avoid handling key release events
             Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key_event(key),
-            Event::Mouse(_) => {}
             Event::Resize(_, _) => {}
+            #[cfg(debug_assertions)]
+            Event::Mouse(m) => match m.kind {
+                MouseEventKind::Drag(_) | MouseEventKind::Moved => {}
+                _ => {
+                    self.on_mouse_event(m);
+                }
+            },
             _ => {}
         }
         Ok(())
@@ -115,6 +129,16 @@ impl App {
                 ViewerContainerEvent::Poll => {}
             },
         };
+    }
+
+    #[cfg_attr(debug_assertions, instrument(skip_all, name = "App::on_mouse_event"))]
+    fn on_mouse_event(&mut self, mouse: MouseEvent) {
+        match self.window {
+            Window::FilePicker(ref mut state) => {
+                state.handle_mouse(mouse);
+            }
+            _ => {}
+        }
     }
 
     fn quit(&mut self) {

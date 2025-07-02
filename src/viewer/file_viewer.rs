@@ -201,7 +201,7 @@ impl FileViewer {
             .render(area[0], buf);
 
         for i in 0..cols {
-            Paragraph::new(format!("{i}"))
+            Paragraph::new(format!("{i:X}"))
                 .centered()
                 .style(Style::default().fg(fg).bold())
                 .render(area[i as usize + 1], buf);
@@ -425,21 +425,21 @@ fn simple_layout_solver(area: Rect, cols: u16, data_size: u16) -> Vec<Rect> {
     let address_padding = 2;
     let address_border = 2;
     let total_address_size = address_size + address_padding + address_border;
-    let right_border = 1;
+    let scrollbar = 1;
 
-    let spacing = (width - (total_address_size + cols * data_size + right_border)) / (cols + 1);
+    let spacing = (width - (total_address_size + cols * data_size + scrollbar)) / (cols + 1);
     #[cfg(debug_assertions)]
     info!(spacing);
 
     let remaining_space =
-        width - (total_address_size + cols * data_size + right_border) - (cols + 1) * spacing;
-    let front_margin = remaining_space / 2;
-    #[cfg(debug_assertions)]
-    info!(front_margin);
-    x += front_margin;
+        width - (total_address_size + cols * data_size + scrollbar) - (cols + 1) * spacing;
+    // let front_margin = remaining_space / 2;
+    // #[cfg(debug_assertions)]
+    // info!(front_margin);
+    // x += front_margin;
 
-    #[cfg(debug_assertions)]
-    info!(x);
+    // #[cfg(debug_assertions)]
+    // info!(x);
 
     rects.push(Rect {
         x,
@@ -453,7 +453,8 @@ fn simple_layout_solver(area: Rect, cols: u16, data_size: u16) -> Vec<Rect> {
     #[cfg(debug_assertions)]
     info!(x);
 
-    for _ in 0..cols {
+    let mut sub = 0;
+    for i in 0..cols {
         rects.push(Rect {
             x,
             y,
@@ -461,6 +462,10 @@ fn simple_layout_solver(area: Rect, cols: u16, data_size: u16) -> Vec<Rect> {
             height: 1,
         });
         x += data_size + spacing;
+        if remaining_space * i / cols > sub {
+            x += 1;
+            sub += 1;
+        }
         #[cfg(debug_assertions)]
         info!(x);
     }
