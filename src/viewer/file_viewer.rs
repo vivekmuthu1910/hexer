@@ -273,7 +273,6 @@ impl FileViewer {
     {
         let fg = Color::LightCyan;
         let mut y = areas[0].y;
-        // let content = &self.content;
         let content: &[T] = cast_slice(&self.content);
         let content_len = content.len();
         'outer_loop: for row in row_offset..(rows + row_offset) {

@@ -4,7 +4,7 @@ This is a simple binary file viewer in terminal
 
 ## Features
 - [x] Select file
-- [ ] View File
+- [x] View File
 - [x] Select Data type and Display type
 - [ ] Search binary data
 

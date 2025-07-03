@@ -5,6 +5,10 @@ description = "View binary files' contents in different modes"
 authors = ["Vivekanandan Muthaiyan <vivekmuthu1910@gmail.com>"]
 license = "MIT"
 edition = "2024"
+readme = "README.md"
+repository = "https://github.com/vivekmuthu1910/hexer"
+homepage = "https://github.com/vivekmuthu1910/hexer"
+keywords = ["binary-viewer", "tui"]
 
 [dependencies]
 crossterm = "0.28.1"
