@@ -1,4 +1,6 @@
+use std::env;
 use std::io::stdout;
+use std::path::PathBuf;
 
 use color_eyre::Result;
 use crossterm::event::{
@@ -7,6 +9,7 @@ use crossterm::event::{
 };
 use crossterm::execute;
 use file_picker::{FilePickerEvent, FilePickerState};
+use launch::{LaunchWindow, resolve_launch};
 use ratatui::{DefaultTerminal, Frame};
 use viewer::{ViewerContainer, ViewerContainerEvent};
 
@@ -16,6 +19,7 @@ use tracing::{Level, info, instrument};
 use tracing_appender::non_blocking::WorkerGuard;
 
 mod file_picker;
+mod launch;
 mod utils;
 mod viewer;
 
@@ -28,9 +32,12 @@ fn main() -> color_eyre::Result<()> {
     #[cfg(debug_assertions)]
     info!("Starting hexer");
 
+    let path = env::args().nth(1).map(PathBuf::from);
+    let launch = resolve_launch(path.as_deref())?;
+
     let terminal = ratatui::init();
     execute!(stdout(), EnableMouseCapture)?;
-    let result = App::new().run(terminal);
+    let result = App::from_launch(launch).run(terminal);
     execute!(stdout(), DisableMouseCapture)?;
     ratatui::restore();
 
@@ -60,6 +67,21 @@ pub struct App {
 impl App {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn from_launch(launch: LaunchWindow) -> Self {
+        let window = match launch {
+            LaunchWindow::FilePicker { cwd } => {
+                Window::FilePicker(FilePickerState::default().with_cwd(cwd))
+            }
+            LaunchWindow::Viewer { file } => {
+                Window::HexViewer(ViewerContainer::default().with_file(file))
+            }
+        };
+        Self {
+            window,
+            running: false,
+        }
     }
 
     pub fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
