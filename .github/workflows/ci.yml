@@ -1,95 +1,200 @@
-name: Hexer
+name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
       - main
       - develop
+    tags:
+      - "*"
 
 env:
   CARGO_TERM_COLOR: always
 
-# ensure that the workflow is only triggered once per PR, subsequent pushes to the PR will cancel
-# and restart the workflow. See https://docs.github.com/en/actions/using-jobs/using-concurrency
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same PR / branch.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
+  crate_metadata:
+    name: Extract crate metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract crate information
+        id: crate_metadata
+        run: |
+          cargo metadata --no-deps --format-version 1 | jq -r '"name=" + .packages[0].name' | tee -a "$GITHUB_OUTPUT"
+          cargo metadata --no-deps --format-version 1 | jq -r '"version=" + .packages[0].version' | tee -a "$GITHUB_OUTPUT"
+    outputs:
+      name: ${{ steps.crate_metadata.outputs.name }}
+      version: ${{ steps.crate_metadata.outputs.version }}
+
   fmt:
     name: fmt
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - name: check formatting
+      - uses: Swatinem/rust-cache@v2
+      - name: Check formatting
         run: cargo fmt -- --check
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
+
   clippy:
     name: clippy
     runs-on: ubuntu-latest
     permissions:
       checks: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - name: Run clippy action
+      - uses: Swatinem/rust-cache@v2
+      - name: Run clippy
         uses: clechasseur/rs-clippy-check@v3
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
-  build:
-    name: build release
+        with:
+          args: --locked --all-targets --all-features -- -D warnings
+
+  test:
+    name: test
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --release --verbose
-  # doc:
-  #   # run docs generation on nightly rather than stable. This enables features like
-  #   # https://doc.rust-lang.org/beta/unstable-book/language-features/doc-cfg.html which allows an
-  #   # API be documented as only available in some specific platforms.
-  #   name: doc
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Install Rust nightly
-  #       uses: dtolnay/rust-toolchain@nightly
-  #     - name: Run cargo doc
-  #       run: cargo doc --no-deps --all-features
-  #       env:
-  #         RUSTDOCFLAGS: --cfg docsrs
-  # test:
-  #   runs-on: ${{ matrix.os }}
-  #   name: test ${{ matrix.os }}
-  #   strategy:
-  #     fail-fast: false
-  #     matrix:
-  #       os: [macos-latest, windows-latest]
-  #   steps:
-  #     # if your project needs OpenSSL, uncomment this to fix Windows builds.
-  #     # it's commented out by default as the install command takes 5-10m.
-  #     # - run: echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append
-  #     #   if: runner.os == 'Windows'
-  #     # - run: vcpkg install openssl:x64-windows-static-md
-  #     #   if: runner.os == 'Windows'
-  #     - uses: actions/checkout@v4
-  #     - name: Install Rust
-  #       uses: dtolnay/rust-toolchain@stable
-  #     # enable this ci template to run regardless of whether the lockfile is checked in or not
-  #     - name: cargo generate-lockfile
-  #       if: hashFiles('Cargo.lock') == ''
-  #       run: cargo generate-lockfile
-  #     - name: cargo test --locked
-  #       run: cargo test --locked --all-features --all-targets
-  #     - name: Cache Cargo dependencies
-  #       uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@v4
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run tests
+        run: cargo test --locked --all-features --all-targets
+
+  build:
+    name: ${{ matrix.job.target }} (${{ matrix.job.os }})
+    runs-on: ${{ matrix.job.os }}
+    needs: crate_metadata
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        job:
+          - { target: x86_64-unknown-linux-gnu,    os: ubuntu-22.04 }
+          - { target: x86_64-unknown-linux-musl,   os: ubuntu-22.04, use-cross: true }
+          - { target: aarch64-unknown-linux-gnu,   os: ubuntu-22.04, use-cross: true }
+          - { target: aarch64-unknown-linux-musl,  os: ubuntu-22.04, use-cross: true }
+          - { target: x86_64-apple-darwin,         os: macos-13 }
+          - { target: aarch64-apple-darwin,        os: macos-14 }
+          - { target: x86_64-pc-windows-msvc,      os: windows-2022 }
+          - { target: aarch64-pc-windows-msvc,     os: windows-11-arm }
+    env:
+      BUILD_CMD: cargo
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Install prerequisites
+        shell: bash
+        run: |
+          case "${{ matrix.job.target }}" in
+            aarch64-unknown-linux-gnu)
+              sudo apt-get -y update
+              sudo apt-get -y install gcc-aarch64-linux-gnu
+              ;;
+          esac
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.job.target }}
+
+      - name: Install cross
+        if: matrix.job.use-cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Use cross for this target
+        if: matrix.job.use-cross
+        shell: bash
+        run: echo "BUILD_CMD=cross" >> "$GITHUB_ENV"
+
+      - name: Show version information
+        shell: bash
+        run: |
+          gcc --version || true
+          rustup -V
+          rustup toolchain list
+          rustup default
+          cargo -V
+          rustc -V
+
+      - name: Build
+        shell: bash
+        run: $BUILD_CMD build --locked --release --target="${{ matrix.job.target }}"
+
+      - name: Set binary name & path
+        id: bin
+        shell: bash
+        run: |
+          EXE_suffix=""
+          case "${{ matrix.job.target }}" in
+            *-pc-windows-*) EXE_suffix=".exe" ;;
+          esac
+
+          BIN_NAME="${{ needs.crate_metadata.outputs.name }}${EXE_suffix}"
+          BIN_PATH="target/${{ matrix.job.target }}/release/${BIN_NAME}"
+
+          echo "BIN_PATH=${BIN_PATH}" >> "$GITHUB_OUTPUT"
+          echo "BIN_NAME=${BIN_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Create archive
+        id: package
+        shell: bash
+        run: |
+          PKG_suffix=".tar.gz"
+          case "${{ matrix.job.target }}" in
+            *-pc-windows-*) PKG_suffix=".zip" ;;
+          esac
+
+          PKG_BASENAME="${{ needs.crate_metadata.outputs.name }}-v${{ needs.crate_metadata.outputs.version }}-${{ matrix.job.target }}"
+          PKG_NAME="${PKG_BASENAME}${PKG_suffix}"
+          echo "PKG_NAME=${PKG_NAME}" >> "$GITHUB_OUTPUT"
+
+          STAGING="_cicd-intermediates/package"
+          ARCHIVE_DIR="${STAGING}/${PKG_BASENAME}"
+          mkdir -p "${ARCHIVE_DIR}"
+
+          cp "${{ steps.bin.outputs.BIN_PATH }}" "${ARCHIVE_DIR}/"
+          cp README.md LICENSE "${ARCHIVE_DIR}/"
+
+          pushd "${STAGING}" >/dev/null
+          case "${{ matrix.job.target }}" in
+            *-pc-windows-*) 7z -y a "${PKG_NAME}" "${PKG_BASENAME}"/* | tail -2 ;;
+            *) tar czf "${PKG_NAME}" "${PKG_BASENAME}"/* ;;
+          esac
+          popd >/dev/null
+
+          echo "PKG_PATH=${STAGING}/${PKG_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.PKG_NAME }}
+          path: ${{ steps.package.outputs.PKG_PATH }}
+
+      - name: Publish release archive
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: ${{ steps.package.outputs.PKG_PATH }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
