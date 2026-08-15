@@ -245,7 +245,7 @@ Documented in the domain model / parent spec but not fully wired yet:
 
 | Concept | Status |
 |--------|--------|
-| View Mode (Binary \| Image) | Not implemented; chrome is Binary-style only |
+| View Mode (Binary \| Image) | Toggle chrome/defaults; one Grid engine; Image pins Width |
 | User-set Width / Stride / Padding | Width pin + Stride + Padding omit/show; Height from Stride |
 | Viewport Width vs logical Width | Viewport separate; horizontal Cursor scroll when Width exceeds it |
 | Cursor + Address-as-byte-offset | Grid reports Address; Binary gutter + status use it; Cursor navigates Values |

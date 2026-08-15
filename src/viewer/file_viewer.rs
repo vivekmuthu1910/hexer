@@ -1,4 +1,4 @@
-use super::common_dt::{DataType, DisplayType, Endianness};
+use super::common_dt::{DataType, DisplayType, Endianness, ViewMode};
 use super::grid::{Grid, Value};
 use crate::utils::previous_power_of_two;
 use num_traits::Float;
@@ -26,6 +26,7 @@ pub struct FileViewer {
     data_type: DataType,
     display_type: DisplayType,
     endianness: Endianness,
+    view_mode: ViewMode,
     content: Vec<u8>,
     /// Pinned Width (Values per row). `None` → auto-fit Viewport Width (Binary).
     pinned_width: Option<usize>,
@@ -261,6 +262,9 @@ impl FileViewer {
     pub fn set_endianness(&mut self, endianness: Endianness) {
         self.endianness = endianness;
     }
+    pub fn set_view_mode(&mut self, view_mode: ViewMode) {
+        self.view_mode = view_mode;
+    }
     pub fn set_pinned_width(&mut self, pinned_width: Option<usize>) {
         self.pinned_width = pinned_width;
     }
@@ -287,14 +291,25 @@ impl FileViewer {
     fn render_header(&self, cols: u16, col_offset: usize, area: &[Rect], buf: &mut Buffer) {
         let fg = Color::LightCyan;
         let b = Block::default().borders(Borders::RIGHT | Borders::LEFT);
-        Paragraph::new(" Address ")
+        let corner = if self.view_mode.uses_address_gutter() {
+            " Address "
+        } else {
+            " Row "
+        };
+        Paragraph::new(corner)
             .style(Style::default().fg(fg).bold())
             .block(b.bg(Color::Reset).fg(fg))
             .render(area[0], buf);
 
         for i in 0..cols {
             let col_index = col_offset + i as usize;
-            Paragraph::new(format!("{col_index:X}"))
+            // Binary: Address-style hex Column labels; Image: decimal Column indices.
+            let label = if self.view_mode.uses_address_gutter() {
+                format!("{col_index:X}")
+            } else {
+                format!("{col_index}")
+            };
+            Paragraph::new(label)
                 .centered()
                 .style(Style::default().fg(fg).bold())
                 .render(area[i as usize + 1], buf);
@@ -328,10 +343,18 @@ impl FileViewer {
             y += 1;
             let mut area = areas[0];
             area.y = y;
-            let Some(row_addr) = grid.row_address(row) else {
-                break 'outer_loop;
+            let gutter = if self.view_mode.uses_address_gutter() {
+                let Some(row_addr) = grid.row_address(row) else {
+                    break 'outer_loop;
+                };
+                format!(" {row_addr:08X} ")
+            } else {
+                if grid.row_address(row).is_none() {
+                    break 'outer_loop;
+                }
+                format!(" {row:8} ")
             };
-            Paragraph::new(format!(" {row_addr:08X} "))
+            Paragraph::new(gutter)
                 .block(
                     Block::default()
                         .borders(Borders::RIGHT | Borders::LEFT)

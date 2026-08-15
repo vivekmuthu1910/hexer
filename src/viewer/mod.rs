@@ -16,7 +16,7 @@ mod common_dt;
 mod file_viewer;
 mod grid;
 
-use common_dt::{DataType, DisplayType, Endianness};
+use common_dt::{DataType, DisplayType, Endianness, ViewMode, stride_help_text};
 
 #[derive(Debug, Default)]
 pub struct ViewerContainer {
@@ -27,6 +27,7 @@ pub struct ViewerContainer {
     data_type: DataType,
     display_type: DisplayType,
     endianness: Endianness,
+    view_mode: ViewMode,
     /// `None` → Binary auto-fit Width to the terminal.
     pinned_width: Option<usize>,
     /// `None` → Stride follows Width.
@@ -45,7 +46,7 @@ pub enum ActionMode {
     #[default]
     Normal,
     SelectDataType(Option<KeyCode>),
-    // EditSearch,
+    Help,
 }
 
 fn render_button(name: String, btn_color: Color, text_color: Color) -> impl Widget {
@@ -62,6 +63,15 @@ impl ViewerContainer {
         match self.action_mode {
             ActionMode::Normal => self.handle_normal_keys(key),
             ActionMode::SelectDataType(_) => self.handle_dt_keys(key),
+            ActionMode::Help => {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q') => {
+                        self.action_mode = ActionMode::Normal;
+                    }
+                    _ => {}
+                }
+                ViewerContainerEvent::Poll
+            }
         }
     }
 
@@ -107,8 +117,11 @@ impl ViewerContainer {
             (_, KeyCode::Char(']')) => self.bump_width(1),
             (_, KeyCode::Char('[')) => self.bump_width(-1),
             (_, KeyCode::Char('a')) => {
-                self.pinned_width = None;
-                self.sync_layout_to_viewer();
+                // Auto Width is Binary-only; Image requires an explicit Width.
+                if !self.view_mode.requires_explicit_width() {
+                    self.pinned_width = None;
+                    self.sync_layout_to_viewer();
+                }
             }
             // Stride: }/{ adjust; = resets Stride to follow Width
             (_, KeyCode::Char('}')) => self.bump_stride(1),
@@ -122,9 +135,21 @@ impl ViewerContainer {
                 self.show_padding = !self.show_padding;
                 self.sync_layout_to_viewer();
             }
+            (_, KeyCode::Char('v')) => self.toggle_view_mode(),
+            (_, KeyCode::Char('?')) => self.action_mode = ActionMode::Help,
             _ => {}
         }
         ViewerContainerEvent::Poll
+    }
+
+    fn toggle_view_mode(&mut self) {
+        let next = self.view_mode.toggle();
+        self.view_mode = next;
+        if next.requires_explicit_width() && self.pinned_width.is_none() {
+            self.pinned_width = Some(self.current_width_for_edit());
+        }
+        self.file_viewer.set_view_mode(next);
+        self.sync_layout_to_viewer();
     }
 
     fn sync_layout_to_viewer(&mut self) {
@@ -241,16 +266,18 @@ impl ViewerContainer {
         self.render_search_bar(layout[1], frame);
 
         let layout = Layout::horizontal([
-            Constraint::Length(88),
-            Constraint::Length(32),
+            Constraint::Length(70),
+            Constraint::Length(22),
             Constraint::Length(23),
+            Constraint::Length(24),
         ])
         .flex(Flex::SpaceAround)
-        .areas::<3>(page_layout[1]);
+        .areas::<4>(page_layout[1]);
 
         self.render_dt_buttons(layout[0], frame);
         self.render_display_buttons(layout[1], frame);
         self.render_endianness_buttons(layout[2], frame);
+        self.render_view_mode_buttons(layout[3], frame);
 
         let content = fs::read(&self.file)?;
 
@@ -258,6 +285,7 @@ impl ViewerContainer {
         info!("Content len: {}", content.len());
 
         self.file_viewer.set_content(content);
+        self.file_viewer.set_view_mode(self.view_mode);
         self.sync_layout_to_viewer();
         frame.render_stateful_widget(
             &self.file_viewer,
@@ -265,15 +293,14 @@ impl ViewerContainer {
             &mut self.file_viewer_state,
         );
         self.render_status(page_layout[3], frame);
+
+        if matches!(self.action_mode, ActionMode::Help) {
+            self.render_help(frame.area(), frame);
+        }
         Ok(())
     }
 
     fn render_status(&self, rect: Rect, frame: &mut Frame) {
-        let address = self
-            .file_viewer_state
-            .cursor_address()
-            .map(|a| format!("{a:08X}"))
-            .unwrap_or_else(|| "--------".to_string());
         let width_label = match self.pinned_width {
             Some(w) => w.to_string(),
             None => format!("auto({})", self.file_viewer_state.viewport_width().max(1)),
@@ -287,17 +314,59 @@ impl ViewerContainer {
             .max(stride_base)
             .to_string();
         let padding_label = if self.show_padding { "show" } else { "omit" };
-        let line = Line::from(vec![
-            Span::styled(" Address: ", Style::default().fg(Color::LightCyan).bold()),
-            Span::styled(address, Style::default().fg(Color::Yellow).bold()),
+
+        let mut spans = Vec::new();
+        if self.view_mode.uses_address_gutter() {
+            let address = self
+                .file_viewer_state
+                .cursor_address()
+                .map(|a| format!("{a:08X}"))
+                .unwrap_or_else(|| "--------".to_string());
+            spans.extend([
+                Span::styled(" Address: ", Style::default().fg(Color::LightCyan).bold()),
+                Span::styled(address, Style::default().fg(Color::Yellow).bold()),
+            ]);
+        } else {
+            let (row, col) = self.file_viewer_state.cursor();
+            spans.extend([
+                Span::styled(" Cursor: ", Style::default().fg(Color::LightCyan).bold()),
+                Span::styled(
+                    format!("({row}, {col})"),
+                    Style::default().fg(Color::Yellow).bold(),
+                ),
+            ]);
+        }
+        spans.extend([
             Span::styled("  Width: ", Style::default().fg(Color::LightCyan).bold()),
             Span::styled(width_label, Style::default().fg(Color::Yellow).bold()),
             Span::styled("  Stride: ", Style::default().fg(Color::LightCyan).bold()),
             Span::styled(stride_label, Style::default().fg(Color::Yellow).bold()),
             Span::styled("  Padding: ", Style::default().fg(Color::LightCyan).bold()),
             Span::styled(padding_label, Style::default().fg(Color::Yellow).bold()),
+            Span::styled("  ?:help", Style::default().fg(Color::DarkGray)),
         ]);
-        frame.render_widget(Paragraph::new(line), rect);
+        frame.render_widget(Paragraph::new(Line::from(spans)), rect);
+    }
+
+    fn render_help(&self, area: Rect, frame: &mut Frame) {
+        let help = format!(
+            " Help \n\n\
+             View Mode (v): Binary ↔ Image — same Grid engine\n\
+             {}\n\
+             Width [/]  auto(a, Binary)  Stride {{/}}  reset(=)  Padding(p)\n\
+             Esc/?/q close help",
+            stride_help_text()
+        );
+        let block = Block::default()
+            .title(" Help ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan))
+            .border_type(BorderType::Rounded);
+        let inner = area.inner(Margin {
+            horizontal: area.width.saturating_sub(60) / 2,
+            vertical: area.height.saturating_sub(10) / 2,
+        });
+        frame.render_widget(Paragraph::new(help).block(block), inner);
     }
 
     fn render_file_name(&mut self, rect: Rect, frame: &mut Frame) {
@@ -353,19 +422,63 @@ impl ViewerContainer {
         frame.render_widget(b, rect);
 
         use Constraint::Length;
-        let btn_layout = Layout::horizontal([Length(11), Length(15)])
+        let btn_layout = Layout::horizontal([Length(11), Length(7)])
             .flex(Flex::SpaceBetween)
             .vertical_margin(1)
             .horizontal_margin(2)
             .split(rect);
         let (btn1, btn2) = match self.display_type {
             DisplayType::Decimal => (
-                render_button("Decimal".to_string(), Color::Green, Color::Black),
-                render_button("HexaDecimal".to_string(), Color::Yellow, Color::Black),
+                render_button(
+                    DisplayType::Decimal.label().to_string(),
+                    Color::Green,
+                    Color::Black,
+                ),
+                render_button(
+                    DisplayType::HexaDecimal.label().to_string(),
+                    Color::Yellow,
+                    Color::Black,
+                ),
             ),
             DisplayType::HexaDecimal => (
-                render_button("Decimal".to_string(), Color::Yellow, Color::Black),
-                render_button("HexaDecimal".to_string(), Color::Green, Color::Black),
+                render_button(
+                    DisplayType::Decimal.label().to_string(),
+                    Color::Yellow,
+                    Color::Black,
+                ),
+                render_button(
+                    DisplayType::HexaDecimal.label().to_string(),
+                    Color::Green,
+                    Color::Black,
+                ),
+            ),
+        };
+        frame.render_widget(btn1, btn_layout[0]);
+        frame.render_widget(btn2, btn_layout[1]);
+    }
+
+    fn render_view_mode_buttons(&self, rect: Rect, frame: &mut Frame) {
+        let b = Block::default()
+            .border_style(Style::default().fg(Color::Cyan))
+            .border_type(BorderType::Rounded)
+            .borders(Borders::ALL)
+            .title(Line::from(" View Mode "));
+        frame.render_widget(b, rect);
+
+        use Constraint::Length;
+        let btn_layout = Layout::horizontal([Length(10), Length(9)])
+            .flex(Flex::SpaceBetween)
+            .vertical_margin(1)
+            .horizontal_margin(2)
+            .split(rect);
+        let (btn1, btn2) = match self.view_mode {
+            ViewMode::Binary => (
+                render_button("Binary".to_string(), Color::Green, Color::Black),
+                render_button("Image".to_string(), Color::Yellow, Color::Black),
+            ),
+            ViewMode::Image => (
+                render_button("Binary".to_string(), Color::Yellow, Color::Black),
+                render_button("Image".to_string(), Color::Green, Color::Black),
             ),
         };
         frame.render_widget(btn1, btn_layout[0]);
