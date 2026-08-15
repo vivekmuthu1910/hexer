@@ -1,6 +1,6 @@
 use std::fmt;
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub enum DataType {
     #[default]
     U8,
@@ -15,7 +15,7 @@ pub enum DataType {
     F64,
 }
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub enum DisplayType {
     #[default]
     Decimal,
@@ -36,7 +36,7 @@ impl DataType {
         DataType::F64,
     ];
 }
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub enum Endianness {
     #[default]
     Little,

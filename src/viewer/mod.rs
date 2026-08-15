@@ -14,6 +14,7 @@ use tracing::{info, instrument};
 
 mod common_dt;
 mod file_viewer;
+mod grid;
 
 use common_dt::{DataType, DisplayType, Endianness};
 

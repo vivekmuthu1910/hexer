@@ -1,6 +1,6 @@
 use super::common_dt::{DataType, DisplayType, Endianness};
+use super::grid::{Grid, Value};
 use crate::utils::previous_power_of_two;
-use bytemuck::{AnyBitPattern, cast_slice};
 use num_traits::Float;
 use ratatui::prelude::{Buffer, Rect};
 use ratatui::style::{Color, Style, Stylize};
@@ -135,7 +135,7 @@ impl StatefulWidget for &FileViewer {
         instrument(skip(self, buf, state), name = "FileViewer::render")
     )]
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let (cols, data_width, data_size) = self.calc_cols(area);
+        let (cols, data_width, _data_size) = self.calc_cols(area);
         let areas = simple_layout_solver(area, cols, data_width);
 
         #[cfg(debug_assertions)]
@@ -144,13 +144,16 @@ impl StatefulWidget for &FileViewer {
         state.rows = area.height as usize - 2;
 
         state.cols = cols as usize;
+        // Grid Width equals the Values-per-row used when indexing (auto-fit cols today).
+        let grid = Grid::from_buffer(&self.content, self.data_type, state.cols);
         state.total_rows = match state.set_cols {
-            Some(col) => self.content.len() / (data_size as usize * col),
-            None => self.content.len() / (data_size as usize * state.cols),
+            Some(col) if col > 0 => grid.values().len() / col,
+            _ => grid.height(),
         };
 
         self.render_header(cols, &areas[..], buf);
         self.render_data(
+            &grid,
             state.row_offset,
             state.col_offset,
             state.rows,
@@ -215,10 +218,11 @@ impl FileViewer {
 
     #[cfg_attr(
         debug_assertions,
-        instrument(skip(self, buf, areas), name = "FileViewer::render_data")
+        instrument(skip(self, buf, areas, grid), name = "FileViewer::render_data")
     )]
     fn render_data(
         &self,
+        grid: &Grid,
         row_offset: usize,
         col_offset: usize,
         rows: usize,
@@ -226,60 +230,13 @@ impl FileViewer {
         areas: &[Rect],
         buf: &mut Buffer,
     ) {
-        match self.data_type {
-            DataType::U8 => {
-                self.render_int_data::<u8>(row_offset, col_offset, rows, cols, areas, buf)
-            }
-            DataType::I8 => {
-                self.render_int_data::<i8>(row_offset, col_offset, rows, cols, areas, buf)
-            }
-            DataType::U16 => {
-                self.render_int_data::<u16>(row_offset, col_offset, rows, cols, areas, buf)
-            }
-            DataType::I16 => {
-                self.render_int_data::<i16>(row_offset, col_offset, rows, cols, areas, buf)
-            }
-            DataType::U32 => {
-                self.render_int_data::<u32>(row_offset, col_offset, rows, cols, areas, buf)
-            }
-            DataType::I32 => {
-                self.render_int_data::<i32>(row_offset, col_offset, rows, cols, areas, buf)
-            }
-            DataType::U64 => {
-                self.render_int_data::<u64>(row_offset, col_offset, rows, cols, areas, buf)
-            }
-            DataType::I64 => {
-                self.render_int_data::<i64>(row_offset, col_offset, rows, cols, areas, buf)
-            }
-            DataType::F32 => {
-                self.render_float_data::<f32, 5>(row_offset, col_offset, rows, cols, areas, buf)
-            }
-            DataType::F64 => {
-                self.render_float_data::<f64, 10>(row_offset, col_offset, rows, cols, areas, buf)
-            }
-        }
-    }
-
-    fn render_int_data<T>(
-        &self,
-        row_offset: usize,
-        col_offset: usize,
-        rows: usize,
-        cols: usize,
-        areas: &[Rect],
-        buf: &mut Buffer,
-    ) where
-        T: AnyBitPattern + Display + UpperHex,
-    {
         let fg = Color::LightCyan;
         let mut y = areas[0].y;
-        let content: &[T] = cast_slice(&self.content);
-        let content_len = content.len();
         'outer_loop: for row in row_offset..(rows + row_offset) {
             y += 1;
             let mut area = areas[0];
             area.y = y;
-            Paragraph::new(format!(" {:08X} ", row * cols))
+            Paragraph::new(format!(" {:08X} ", row * grid.width()))
                 .block(
                     Block::default()
                         .borders(Borders::RIGHT | Borders::LEFT)
@@ -299,71 +256,11 @@ impl FileViewer {
                 area = areas[(col - col_offset) + 1];
                 area.y = y;
 
-                if (row * cols + col) >= content_len {
+                let Some(value) = grid.value_at(row, col) else {
                     break 'outer_loop;
-                }
-                match self.display_type {
-                    DisplayType::Decimal => {
-                        Paragraph::new(format!("{}{SUB_10}", content[row * cols + col]))
-                            .right_aligned()
-                            .style(Style::default().fg(Color::Yellow))
-                            .render(area, buf)
-                    }
-                    DisplayType::HexaDecimal => {
-                        Paragraph::new(format!("{:X}{SUB_16}", content[row * cols + col]))
-                            .right_aligned()
-                            .style(Style::default().fg(Color::Yellow))
-                            .render(area, buf)
-                    }
-                }
-            }
-        }
-    }
-
-    fn render_float_data<T, const PREC: usize>(
-        &self,
-        row_offset: usize,
-        col_offset: usize,
-        rows: usize,
-        cols: usize,
-        areas: &[Rect],
-        buf: &mut Buffer,
-    ) where
-        T: AnyBitPattern + Display + Float + LowerExp,
-    {
-        let fg = Color::LightCyan;
-        let mut y = areas[0].y;
-        let content: &[T] = cast_slice(&self.content);
-        let content_len = content.len();
-        'outer_loop: for row in row_offset..(rows + row_offset) {
-            y += 1;
-            let mut area = areas[0];
-            area.y = y;
-            Paragraph::new(format!(" {:08X} ", row * cols))
-                .block(
-                    Block::default()
-                        .borders(Borders::RIGHT | Borders::LEFT)
-                        .bg(Color::Reset)
-                        .fg(fg),
-                )
-                .style(Style::default().fg(fg).bold())
-                .render(area, buf);
-            area = areas[cols + 1];
-            area.y = y;
-            Block::default()
-                .borders(Borders::RIGHT)
-                .bg(Color::Reset)
-                .fg(fg)
-                .render(area, buf);
-            for col in col_offset..(cols + col_offset) {
-                area = areas[(col - col_offset) + 1];
-                area.y = y;
-
-                if (row * cols + col) >= content_len {
-                    break 'outer_loop;
-                }
-
-                Paragraph::new(format_scientific_unicode(content[row * cols + col], PREC))
+                };
+                let text = format_value(value, self.display_type);
+                Paragraph::new(text)
                     .right_aligned()
                     .style(Style::default().fg(Color::Yellow))
                     .render(area, buf);
@@ -410,6 +307,31 @@ impl FileViewer {
     }
 }
 
+fn format_value(value: &Value, display_type: DisplayType) -> String {
+    match value {
+        Value::U8(v) => format_int(*v, display_type),
+        Value::I8(v) => format_int(*v, display_type),
+        Value::U16(v) => format_int(*v, display_type),
+        Value::I16(v) => format_int(*v, display_type),
+        Value::U32(v) => format_int(*v, display_type),
+        Value::I32(v) => format_int(*v, display_type),
+        Value::U64(v) => format_int(*v, display_type),
+        Value::I64(v) => format_int(*v, display_type),
+        Value::F32(v) => format_scientific_unicode(*v, 5),
+        Value::F64(v) => format_scientific_unicode(*v, 10),
+    }
+}
+
+fn format_int<T>(val: T, display_type: DisplayType) -> String
+where
+    T: Display + UpperHex,
+{
+    match display_type {
+        DisplayType::Decimal => format!("{val}{SUB_10}"),
+        DisplayType::HexaDecimal => format!("{val:X}{SUB_16}"),
+    }
+}
+
 #[cfg_attr(debug_assertions, instrument)]
 fn simple_layout_solver(area: Rect, cols: u16, data_size: u16) -> Vec<Rect> {
     let mut rects = vec![];
@@ -432,13 +354,6 @@ fn simple_layout_solver(area: Rect, cols: u16, data_size: u16) -> Vec<Rect> {
 
     let remaining_space =
         width - (total_address_size + cols * data_size + scrollbar) - (cols + 1) * spacing;
-    // let front_margin = remaining_space / 2;
-    // #[cfg(debug_assertions)]
-    // info!(front_margin);
-    // x += front_margin;
-
-    // #[cfg(debug_assertions)]
-    // info!(x);
 
     rects.push(Rect {
         x,
