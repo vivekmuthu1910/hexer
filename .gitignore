@@ -3,3 +3,4 @@
 .envrc
 tracing.log
 test-data
+.zellij/
