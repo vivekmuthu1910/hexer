@@ -27,7 +27,11 @@ pub struct ViewerContainer {
     data_type: DataType,
     display_type: DisplayType,
     endianness: Endianness,
-    // search_field: String,
+    /// `None` → Binary auto-fit Width to the terminal.
+    pinned_width: Option<usize>,
+    /// `None` → Stride follows Width.
+    pinned_stride: Option<usize>,
+    show_padding: bool,
 }
 
 pub enum ViewerContainerEvent {
@@ -99,9 +103,68 @@ impl ViewerContainer {
             (_, KeyCode::End) => self.file_viewer_state.goto_end(),
             (_, KeyCode::PageUp) => self.file_viewer_state.scroll_up(),
             (_, KeyCode::PageDown) => self.file_viewer_state.scroll_down(),
+            // Width: ]/[ pin & adjust; a = auto (unpin)
+            (_, KeyCode::Char(']')) => self.bump_width(1),
+            (_, KeyCode::Char('[')) => self.bump_width(-1),
+            (_, KeyCode::Char('a')) => {
+                self.pinned_width = None;
+                self.sync_layout_to_viewer();
+            }
+            // Stride: }/{ adjust; = resets Stride to follow Width
+            (_, KeyCode::Char('}')) => self.bump_stride(1),
+            (_, KeyCode::Char('{')) => self.bump_stride(-1),
+            (_, KeyCode::Char('=')) => {
+                self.pinned_stride = None;
+                self.sync_layout_to_viewer();
+            }
+            // Padding visibility
+            (_, KeyCode::Char('p')) => {
+                self.show_padding = !self.show_padding;
+                self.sync_layout_to_viewer();
+            }
             _ => {}
         }
         ViewerContainerEvent::Poll
+    }
+
+    fn sync_layout_to_viewer(&mut self) {
+        self.file_viewer.set_pinned_width(self.pinned_width);
+        self.file_viewer.set_pinned_stride(self.pinned_stride);
+        self.file_viewer.set_show_padding(self.show_padding);
+    }
+
+    fn current_width_for_edit(&self) -> usize {
+        self.pinned_width
+            .or_else(|| {
+                let w = self.file_viewer_state.viewport_width();
+                if w > 0 {
+                    Some(w)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(1)
+            .max(1)
+    }
+
+    fn bump_width(&mut self, delta: i32) {
+        let current = self.current_width_for_edit() as i32;
+        let next = (current + delta).max(1) as usize;
+        self.pinned_width = Some(next);
+        if let Some(stride) = self.pinned_stride {
+            if stride < next {
+                self.pinned_stride = Some(next);
+            }
+        }
+        self.sync_layout_to_viewer();
+    }
+
+    fn bump_stride(&mut self, delta: i32) {
+        let width = self.current_width_for_edit();
+        let current = self.pinned_stride.unwrap_or(width) as i32;
+        let next = (current + delta).max(width as i32) as usize;
+        self.pinned_stride = Some(next);
+        self.sync_layout_to_viewer();
     }
 
     fn handle_dt_keys(&mut self, key: KeyEvent) -> ViewerContainerEvent {
@@ -195,6 +258,7 @@ impl ViewerContainer {
         info!("Content len: {}", content.len());
 
         self.file_viewer.set_content(content);
+        self.sync_layout_to_viewer();
         frame.render_stateful_widget(
             &self.file_viewer,
             page_layout[2],
@@ -210,9 +274,28 @@ impl ViewerContainer {
             .cursor_address()
             .map(|a| format!("{a:08X}"))
             .unwrap_or_else(|| "--------".to_string());
+        let width_label = match self.pinned_width {
+            Some(w) => w.to_string(),
+            None => format!("auto({})", self.file_viewer_state.viewport_width().max(1)),
+        };
+        let stride_base = self
+            .pinned_width
+            .unwrap_or_else(|| self.file_viewer_state.viewport_width().max(1));
+        let stride_label = self
+            .pinned_stride
+            .unwrap_or(stride_base)
+            .max(stride_base)
+            .to_string();
+        let padding_label = if self.show_padding { "show" } else { "omit" };
         let line = Line::from(vec![
             Span::styled(" Address: ", Style::default().fg(Color::LightCyan).bold()),
             Span::styled(address, Style::default().fg(Color::Yellow).bold()),
+            Span::styled("  Width: ", Style::default().fg(Color::LightCyan).bold()),
+            Span::styled(width_label, Style::default().fg(Color::Yellow).bold()),
+            Span::styled("  Stride: ", Style::default().fg(Color::LightCyan).bold()),
+            Span::styled(stride_label, Style::default().fg(Color::Yellow).bold()),
+            Span::styled("  Padding: ", Style::default().fg(Color::LightCyan).bold()),
+            Span::styled(padding_label, Style::default().fg(Color::Yellow).bold()),
         ]);
         frame.render_widget(Paragraph::new(line), rect);
     }

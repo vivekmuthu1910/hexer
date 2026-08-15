@@ -213,15 +213,15 @@ Preferred test surfaces (no ratatui frame snapshots):
   ╰──────────────────────────────────────────╯
 
   ╭──────────────────────────────────────────╮
-  │ viewer::grid::Grid::from_buffer          │
-  │   decode + Width/Height                  │
-  │   Endianness Little/Big                  │
+  │ viewer::grid::Grid::from_buffer_layout   │
+  │   Width / Stride / Padding / Height      │
   │   Address (byte offset) at Grid position │
   ╰──────────────────────────────────────────╯
 
   ╭──────────────────────────────────────────╮
   │ viewer::file_viewer::FileViewerState     │
   │   Cursor move / viewport follow          │
+  │   Width > Viewport Width horizontal nav  │
   ╰──────────────────────────────────────────╯
 ```
 
@@ -246,8 +246,8 @@ Documented in the domain model / parent spec but not fully wired yet:
 | Concept | Status |
 |--------|--------|
 | View Mode (Binary \| Image) | Not implemented; chrome is Binary-style only |
-| User-set Width / Stride / Padding | Auto Width only; Stride = Width |
-| Viewport Width vs logical Width | Horizontal scroll APIs exist; logical Width not pinned |
+| User-set Width / Stride / Padding | Width pin + Stride + Padding omit/show; Height from Stride |
+| Viewport Width vs logical Width | Viewport separate; horizontal Cursor scroll when Width exceeds it |
 | Cursor + Address-as-byte-offset | Grid reports Address; Binary gutter + status use it; Cursor navigates Values |
 | CLI viewer option flags | Path only (`launch`); flags are future work |
 | Search | UI stub only |

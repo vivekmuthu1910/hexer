@@ -27,17 +27,24 @@ pub struct FileViewer {
     display_type: DisplayType,
     endianness: Endianness,
     content: Vec<u8>,
+    /// Pinned Width (Values per row). `None` → auto-fit Viewport Width (Binary).
+    pinned_width: Option<usize>,
+    /// Pinned Stride (Values). `None` → Stride = Width.
+    pinned_stride: Option<usize>,
+    show_padding: bool,
 }
 
 #[derive(Debug, Default)]
 pub struct FileViewerState {
     row_offset: usize,
     col_offset: usize,
+    /// Viewport Width: how many Grid Values fit horizontally in the terminal.
     cols: usize,
     rows: usize,
     total_rows: usize,
-    set_cols: Option<usize>,
-    /// Focused Grid Value (Row, Column).
+    /// Grid Width for Cursor bounds (Width, or Stride if Padding is shown).
+    grid_width: usize,
+    /// Currently focused Grid Value (Row, Column).
     cursor_row: usize,
     cursor_col: usize,
     /// Byte-offset Address of the Cursor, refreshed on render.
@@ -54,8 +61,16 @@ impl FileViewerState {
         (self.cursor_row, self.cursor_col)
     }
 
-    fn grid_width(&self) -> usize {
-        self.set_cols.unwrap_or(self.cols).max(1)
+    pub fn grid_width(&self) -> usize {
+        self.grid_width
+    }
+
+    pub fn viewport_width(&self) -> usize {
+        self.cols
+    }
+
+    fn cursor_row_span(&self) -> usize {
+        self.grid_width.max(1)
     }
 
     fn sync_scrollbar(&mut self) {
@@ -88,7 +103,7 @@ impl FileViewerState {
             return;
         }
         self.cursor_row = self.cursor_row.min(self.total_rows - 1);
-        let width = self.grid_width();
+        let width = self.cursor_row_span();
         self.cursor_col = self.cursor_col.min(width.saturating_sub(1));
     }
 
@@ -107,7 +122,7 @@ impl FileViewerState {
     }
 
     pub fn move_right(&mut self) {
-        let width = self.grid_width();
+        let width = self.cursor_row_span();
         if self.cursor_col + 1 < width {
             self.cursor_col += 1;
             self.ensure_cursor_visible();
@@ -139,7 +154,7 @@ impl FileViewerState {
     }
 
     pub fn goto_end(&mut self) {
-        let width = self.grid_width();
+        let width = self.cursor_row_span();
         if width > 0 {
             self.cursor_col = width - 1;
             self.ensure_cursor_visible();
@@ -172,24 +187,40 @@ impl StatefulWidget for &FileViewer {
         instrument(skip(self, buf, state), name = "FileViewer::render")
     )]
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let (cols, data_width, _data_size) = self.calc_cols(area);
-        let areas = simple_layout_solver(area, cols, data_width);
+        let (viewport_cols, data_width, _data_size) = self.calc_cols(area);
+        let areas = simple_layout_solver(area, viewport_cols, data_width);
 
         #[cfg(debug_assertions)]
         info!(?areas);
 
         state.rows = area.height as usize - 2;
+        state.cols = viewport_cols as usize; // Viewport Width
 
-        state.cols = cols as usize;
-        // Logical Width: pinned set_cols, else auto-fit viewport columns.
-        let width = state.set_cols.filter(|&w| w > 0).unwrap_or(state.cols).max(1);
-        let grid = Grid::from_buffer(&self.content, self.data_type, self.endianness, width);
+        let width = self
+            .pinned_width
+            .filter(|&w| w > 0)
+            .unwrap_or(state.cols)
+            .max(1);
+        let stride = self
+            .pinned_stride
+            .filter(|&s| s > 0)
+            .unwrap_or(width)
+            .max(width);
+        let grid = Grid::from_buffer_layout(
+            &self.content,
+            self.data_type,
+            self.endianness,
+            width,
+            stride,
+            self.show_padding,
+        );
+        state.grid_width = grid.grid_width();
         state.total_rows = grid.height();
         state.clamp_cursor();
         state.ensure_cursor_visible();
         state.cursor_address = grid.address_at(state.cursor_row, state.cursor_col);
 
-        self.render_header(cols, &areas[..], buf);
+        self.render_header(viewport_cols, state.col_offset, &areas[..], buf);
         self.render_data(
             &grid,
             state.row_offset,
@@ -230,12 +261,30 @@ impl FileViewer {
     pub fn set_endianness(&mut self, endianness: Endianness) {
         self.endianness = endianness;
     }
+    pub fn set_pinned_width(&mut self, pinned_width: Option<usize>) {
+        self.pinned_width = pinned_width;
+    }
+    pub fn set_pinned_stride(&mut self, pinned_stride: Option<usize>) {
+        self.pinned_stride = pinned_stride;
+    }
+    pub fn set_show_padding(&mut self, show_padding: bool) {
+        self.show_padding = show_padding;
+    }
+    pub fn pinned_width(&self) -> Option<usize> {
+        self.pinned_width
+    }
+    pub fn pinned_stride(&self) -> Option<usize> {
+        self.pinned_stride
+    }
+    pub fn show_padding(&self) -> bool {
+        self.show_padding
+    }
 
     #[cfg_attr(
         debug_assertions,
         instrument(skip(self, buf), name = "FileViewer::render_header")
     )]
-    fn render_header(&self, cols: u16, area: &[Rect], buf: &mut Buffer) {
+    fn render_header(&self, cols: u16, col_offset: usize, area: &[Rect], buf: &mut Buffer) {
         let fg = Color::LightCyan;
         let b = Block::default().borders(Borders::RIGHT | Borders::LEFT);
         Paragraph::new(" Address ")
@@ -244,7 +293,8 @@ impl FileViewer {
             .render(area[0], buf);
 
         for i in 0..cols {
-            Paragraph::new(format!("{i:X}"))
+            let col_index = col_offset + i as usize;
+            Paragraph::new(format!("{col_index:X}"))
                 .centered()
                 .style(Style::default().fg(fg).bold())
                 .render(area[i as usize + 1], buf);
@@ -302,7 +352,7 @@ impl FileViewer {
                 area.y = y;
 
                 let Some(value) = grid.value_at(row, col) else {
-                    break 'outer_loop;
+                    continue;
                 };
                 let text = format_value(value, self.display_type);
                 let style = if row == cursor_row && col == cursor_col {
@@ -498,7 +548,7 @@ mod tests {
             total_rows,
             cols: viewport_cols,
             rows: viewport_rows,
-            set_cols: Some(width),
+            grid_width: width,
             ..FileViewerState::default()
         }
     }
@@ -548,5 +598,19 @@ mod tests {
         state.move_down();
         state.move_right();
         assert_eq!(state.cursor(), (1, 1));
+    }
+
+    #[test]
+    fn horizontal_navigation_works_when_width_exceeds_viewport() {
+        // Logical Width 8, Viewport Width 3 → Cursor can reach col 7 with scroll
+        let mut state = state_with_grid(2, 8, 2, 3);
+
+        state.goto_end();
+        assert_eq!(state.cursor(), (0, 7));
+        assert_eq!(state.col_offset, 5);
+
+        state.goto_start();
+        assert_eq!(state.cursor(), (0, 0));
+        assert_eq!(state.col_offset, 0);
     }
 }

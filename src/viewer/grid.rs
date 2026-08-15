@@ -15,24 +15,39 @@ pub enum Value {
     F64(f64),
 }
 
-/// Grid of Values laid out with Width (Stride = Width for current parity).
+/// Grid of Values laid out with Width and Stride (Padding = Stride−Width).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Grid {
     width: usize,
+    stride: usize,
+    show_padding: bool,
     value_size: usize,
     values: Vec<Value>,
 }
 
 impl Grid {
-    /// Decode a Buffer into a Grid. Stride = Width.
-    /// Endianness selects byte order for multi-byte Values (default Little).
+    /// Decode a Buffer into a Grid with Stride = Width (no Padding).
     pub fn from_buffer(
         buffer: &[u8],
         data_type: DataType,
         endianness: Endianness,
         width: usize,
     ) -> Self {
+        Self::from_buffer_layout(buffer, data_type, endianness, width, width, false)
+    }
+
+    /// Decode a Buffer into a Grid with explicit Width, Stride, and Padding visibility.
+    /// Stride is counted in Values; when Stride < Width it is clamped up to Width.
+    pub fn from_buffer_layout(
+        buffer: &[u8],
+        data_type: DataType,
+        endianness: Endianness,
+        width: usize,
+        stride: usize,
+        show_padding: bool,
+    ) -> Self {
         let value_size = data_type.byte_size();
+        let stride = stride.max(width);
         let values = match data_type {
             DataType::U8 => buffer.iter().map(|&b| Value::U8(b)).collect(),
             DataType::I8 => buffer.iter().map(|&b| Value::I8(b as i8)).collect(),
@@ -95,6 +110,8 @@ impl Grid {
         };
         Self {
             width,
+            stride,
+            show_padding,
             value_size,
             values,
         }
@@ -104,24 +121,43 @@ impl Grid {
         self.width
     }
 
-    /// Height derived as floor(value_count / Width), matching current total_rows.
-    pub fn height(&self) -> usize {
-        if self.width == 0 {
-            0
+    pub fn stride(&self) -> usize {
+        self.stride
+    }
+
+    /// Columns in a Grid row for Cursor/paint: Width, or Stride when Padding is shown.
+    pub fn grid_width(&self) -> usize {
+        if self.show_padding {
+            self.stride
         } else {
-            self.values.len() / self.width
+            self.width
         }
     }
 
+    /// Height derived from value count and Stride (includes a partial final row).
+    pub fn height(&self) -> usize {
+        if self.stride == 0 || self.values.is_empty() {
+            0
+        } else {
+            (self.values.len() + self.stride - 1) / self.stride
+        }
+    }
+
+    fn index_at(&self, row: usize, col: usize) -> Option<usize> {
+        if col >= self.grid_width() {
+            return None;
+        }
+        row.checked_mul(self.stride)?.checked_add(col)
+    }
+
     pub fn value_at(&self, row: usize, col: usize) -> Option<&Value> {
-        // Flat index row * Width + col — matches prior cast_slice indexing
-        // (horizontal scroll may use col >= Width).
-        self.values.get(row * self.width + col)
+        let index = self.index_at(row, col)?;
+        self.values.get(index)
     }
 
     /// Byte offset (Address) of the Value at (row, col) within the Buffer.
     pub fn address_at(&self, row: usize, col: usize) -> Option<usize> {
-        let index = row.checked_mul(self.width)?.checked_add(col)?;
+        let index = self.index_at(row, col)?;
         if index < self.values.len() {
             Some(index * self.value_size)
         } else {
@@ -174,13 +210,13 @@ mod tests {
         let grid = Grid::from_buffer(&buffer, DataType::U8, Endianness::Little, 2);
 
         assert_eq!(grid.width(), 2);
-        assert_eq!(grid.height(), 2);
+        assert_eq!(grid.height(), 3); // partial final row for the 5th Value
         assert_eq!(grid.value_at(0, 0), Some(&Value::U8(1)));
         assert_eq!(grid.value_at(0, 1), Some(&Value::U8(2)));
         assert_eq!(grid.value_at(1, 0), Some(&Value::U8(3)));
         assert_eq!(grid.value_at(1, 1), Some(&Value::U8(4)));
         assert_eq!(grid.value_at(2, 0), Some(&Value::U8(5)));
-        assert_eq!(grid.value_at(0, 2), Some(&Value::U8(3)));
+        assert_eq!(grid.value_at(0, 2), None); // beyond Width
         assert_eq!(grid.value_at(2, 1), None);
     }
 
@@ -284,5 +320,87 @@ mod tests {
         assert_eq!(grid.row_address(1), Some(8));
         assert_eq!(grid.row_address(2), Some(16));
         assert_eq!(grid.row_address(3), None);
+    }
+
+    #[test]
+    fn stride_greater_than_width_omits_padding_by_default() {
+        // Values: 0 1 2 3 4 5 6 7 8 9 10 11
+        // Width=3, Stride=5 → row0: 0,1,2 (skip 3,4); row1: 5,6,7 (skip 8,9); row2: 10,11,(pad)
+        let buffer: Vec<u8> = (0u8..12).collect();
+        let grid = Grid::from_buffer_layout(
+            &buffer,
+            DataType::U8,
+            Endianness::Little,
+            3,
+            5,
+            false,
+        );
+
+        assert_eq!(grid.width(), 3);
+        assert_eq!(grid.stride(), 5);
+        assert_eq!(grid.height(), 3); // includes partial row at Values 10..11
+        assert_eq!(grid.value_at(0, 0), Some(&Value::U8(0)));
+        assert_eq!(grid.value_at(0, 2), Some(&Value::U8(2)));
+        assert_eq!(grid.value_at(0, 3), None); // Padding omitted
+        assert_eq!(grid.value_at(1, 0), Some(&Value::U8(5)));
+        assert_eq!(grid.value_at(1, 2), Some(&Value::U8(7)));
+        assert_eq!(grid.value_at(2, 0), Some(&Value::U8(10)));
+        assert_eq!(grid.address_at(1, 0), Some(5));
+        assert_eq!(grid.row_address(1), Some(5));
+    }
+
+    #[test]
+    fn stride_greater_than_width_can_show_padding() {
+        let buffer: Vec<u8> = (0u8..12).collect();
+        let grid = Grid::from_buffer_layout(
+            &buffer,
+            DataType::U8,
+            Endianness::Little,
+            3,
+            5,
+            true,
+        );
+
+        assert_eq!(grid.height(), 3);
+        assert_eq!(grid.value_at(0, 3), Some(&Value::U8(3)));
+        assert_eq!(grid.value_at(0, 4), Some(&Value::U8(4)));
+        assert_eq!(grid.value_at(1, 3), Some(&Value::U8(8)));
+        assert_eq!(grid.value_at(2, 0), Some(&Value::U8(10)));
+        assert_eq!(grid.address_at(0, 4), Some(4));
+    }
+
+    #[test]
+    fn height_derives_from_value_count_and_stride() {
+        let buffer = [0u8; 20];
+        let grid = Grid::from_buffer_layout(
+            &buffer,
+            DataType::U8,
+            Endianness::Little,
+            4,
+            6,
+            false,
+        );
+        // 20 Values / Stride 6 → 3 complete rows + partial row at 18..19
+        assert_eq!(grid.height(), 4);
+        assert_eq!(grid.row_address(2), Some(12));
+        assert_eq!(grid.row_address(3), Some(18));
+        assert_eq!(grid.row_address(4), None);
+    }
+
+    #[test]
+    fn stride_defaults_to_width_when_equal() {
+        let buffer = [0u8; 8];
+        let grid = Grid::from_buffer_layout(
+            &buffer,
+            DataType::U8,
+            Endianness::Little,
+            4,
+            4,
+            false,
+        );
+        assert_eq!(grid.stride(), 4);
+        assert_eq!(grid.height(), 2);
+        assert_eq!(grid.value_at(1, 0), Some(&Value::U8(0)));
+        assert_eq!(grid.address_at(1, 0), Some(4));
     }
 }
