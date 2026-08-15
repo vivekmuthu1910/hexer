@@ -19,6 +19,7 @@ pub enum Value {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Grid {
     width: usize,
+    value_size: usize,
     values: Vec<Value>,
 }
 
@@ -31,6 +32,7 @@ impl Grid {
         endianness: Endianness,
         width: usize,
     ) -> Self {
+        let value_size = data_type.byte_size();
         let values = match data_type {
             DataType::U8 => buffer.iter().map(|&b| Value::U8(b)).collect(),
             DataType::I8 => buffer.iter().map(|&b| Value::I8(b as i8)).collect(),
@@ -91,7 +93,11 @@ impl Grid {
                 Value::F64,
             ),
         };
-        Self { width, values }
+        Self {
+            width,
+            value_size,
+            values,
+        }
     }
 
     pub fn width(&self) -> usize {
@@ -111,6 +117,21 @@ impl Grid {
         // Flat index row * Width + col — matches prior cast_slice indexing
         // (horizontal scroll may use col >= Width).
         self.values.get(row * self.width + col)
+    }
+
+    /// Byte offset (Address) of the Value at (row, col) within the Buffer.
+    pub fn address_at(&self, row: usize, col: usize) -> Option<usize> {
+        let index = row.checked_mul(self.width)?.checked_add(col)?;
+        if index < self.values.len() {
+            Some(index * self.value_size)
+        } else {
+            None
+        }
+    }
+
+    /// Byte offset (Address) of the first Value on `row`.
+    pub fn row_address(&self, row: usize) -> Option<usize> {
+        self.address_at(row, 0)
     }
 
     pub fn values(&self) -> &[Value] {
@@ -228,5 +249,40 @@ mod tests {
     #[test]
     fn default_endianness_is_little() {
         assert_eq!(Endianness::default(), Endianness::Little);
+    }
+
+    #[test]
+    fn address_at_is_byte_offset_for_u8() {
+        let buffer = [0u8; 8];
+        let grid = Grid::from_buffer(&buffer, DataType::U8, Endianness::Little, 4);
+
+        assert_eq!(grid.address_at(0, 0), Some(0));
+        assert_eq!(grid.address_at(0, 3), Some(3));
+        assert_eq!(grid.address_at(1, 0), Some(4));
+        assert_eq!(grid.address_at(1, 2), Some(6));
+        assert_eq!(grid.address_at(2, 0), None);
+    }
+
+    #[test]
+    fn address_at_scales_by_value_byte_size() {
+        let buffer = [0u8; 16];
+        let grid = Grid::from_buffer(&buffer, DataType::U16, Endianness::Little, 4);
+
+        // 4 U16 Values per row → row 1 starts at byte 8
+        assert_eq!(grid.address_at(0, 0), Some(0));
+        assert_eq!(grid.address_at(0, 1), Some(2));
+        assert_eq!(grid.address_at(1, 0), Some(8));
+        assert_eq!(grid.address_at(1, 3), Some(14));
+    }
+
+    #[test]
+    fn row_start_address_is_byte_offset_of_first_value() {
+        let buffer = [0u8; 24];
+        let grid = Grid::from_buffer(&buffer, DataType::U32, Endianness::Little, 2);
+
+        assert_eq!(grid.row_address(0), Some(0));
+        assert_eq!(grid.row_address(1), Some(8));
+        assert_eq!(grid.row_address(2), Some(16));
+        assert_eq!(grid.row_address(3), None);
     }
 }

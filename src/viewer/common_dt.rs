@@ -35,6 +35,16 @@ impl DataType {
         DataType::F32,
         DataType::F64,
     ];
+
+    /// Byte size of one Value under this Data Type.
+    pub fn byte_size(self) -> usize {
+        match self {
+            DataType::U8 | DataType::I8 => 1,
+            DataType::U16 | DataType::I16 => 2,
+            DataType::U32 | DataType::I32 | DataType::F32 => 4,
+            DataType::U64 | DataType::I64 | DataType::F64 => 8,
+        }
+    }
 }
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub enum Endianness {

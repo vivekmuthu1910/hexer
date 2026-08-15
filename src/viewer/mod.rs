@@ -168,8 +168,9 @@ impl ViewerContainer {
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Fill(1),
+            Constraint::Length(1),
         ])
-        .areas::<3>(frame.area());
+        .areas::<4>(frame.area());
 
         let layout = Layout::horizontal([Constraint::Length(70), Constraint::Fill(1)])
             .areas::<2>(page_layout[0]);
@@ -199,7 +200,21 @@ impl ViewerContainer {
             page_layout[2],
             &mut self.file_viewer_state,
         );
+        self.render_status(page_layout[3], frame);
         Ok(())
+    }
+
+    fn render_status(&self, rect: Rect, frame: &mut Frame) {
+        let address = self
+            .file_viewer_state
+            .cursor_address()
+            .map(|a| format!("{a:08X}"))
+            .unwrap_or_else(|| "--------".to_string());
+        let line = Line::from(vec![
+            Span::styled(" Address: ", Style::default().fg(Color::LightCyan).bold()),
+            Span::styled(address, Style::default().fg(Color::Yellow).bold()),
+        ]);
+        frame.render_widget(Paragraph::new(line), rect);
     }
 
     fn render_file_name(&mut self, rect: Rect, frame: &mut Frame) {

@@ -37,94 +37,131 @@ pub struct FileViewerState {
     rows: usize,
     total_rows: usize,
     set_cols: Option<usize>,
+    /// Focused Grid Value (Row, Column).
+    cursor_row: usize,
+    cursor_col: usize,
+    /// Byte-offset Address of the Cursor, refreshed on render.
+    cursor_address: Option<usize>,
     scrollbar: Option<ScrollbarState>,
 }
 
 impl FileViewerState {
+    pub fn cursor_address(&self) -> Option<usize> {
+        self.cursor_address
+    }
+
+    pub fn cursor(&self) -> (usize, usize) {
+        (self.cursor_row, self.cursor_col)
+    }
+
+    fn grid_width(&self) -> usize {
+        self.set_cols.unwrap_or(self.cols).max(1)
+    }
+
+    fn sync_scrollbar(&mut self) {
+        if let Some(scroll) = self.scrollbar {
+            self.scrollbar = Some(scroll.position(self.row_offset));
+        }
+    }
+
+    fn ensure_cursor_visible(&mut self) {
+        if self.rows == 0 || self.cols == 0 {
+            return;
+        }
+        if self.cursor_row < self.row_offset {
+            self.row_offset = self.cursor_row;
+        } else if self.cursor_row >= self.row_offset + self.rows {
+            self.row_offset = self.cursor_row + 1 - self.rows;
+        }
+        if self.cursor_col < self.col_offset {
+            self.col_offset = self.cursor_col;
+        } else if self.cursor_col >= self.col_offset + self.cols {
+            self.col_offset = self.cursor_col + 1 - self.cols;
+        }
+        self.sync_scrollbar();
+    }
+
+    fn clamp_cursor(&mut self) {
+        if self.total_rows == 0 {
+            self.cursor_row = 0;
+            self.cursor_col = 0;
+            return;
+        }
+        self.cursor_row = self.cursor_row.min(self.total_rows - 1);
+        let width = self.grid_width();
+        self.cursor_col = self.cursor_col.min(width.saturating_sub(1));
+    }
+
     pub fn move_down(&mut self) {
-        if self.total_rows > self.rows && self.row_offset < (self.total_rows - self.rows) {
-            self.row_offset += 1;
-            if let Some(ref mut scrollbar_state) = self.scrollbar {
-                scrollbar_state.next();
-            }
+        if self.cursor_row + 1 < self.total_rows {
+            self.cursor_row += 1;
+            self.ensure_cursor_visible();
         }
     }
 
     pub fn move_up(&mut self) {
-        if self.row_offset > 0 {
-            self.row_offset -= 1;
-            if let Some(ref mut scrollbar_state) = self.scrollbar {
-                scrollbar_state.prev();
-            }
+        if self.cursor_row > 0 {
+            self.cursor_row -= 1;
+            self.ensure_cursor_visible();
         }
     }
 
     pub fn move_right(&mut self) {
-        if let Some(col) = self.set_cols {
-            if col > self.cols && self.col_offset < (col - self.cols) {
-                self.col_offset += 1;
-            }
+        let width = self.grid_width();
+        if self.cursor_col + 1 < width {
+            self.cursor_col += 1;
+            self.ensure_cursor_visible();
         }
     }
 
     pub fn move_left(&mut self) {
-        if self.set_cols.is_some() && self.col_offset > 0 {
-            self.col_offset -= 1;
+        if self.cursor_col > 0 {
+            self.cursor_col -= 1;
+            self.ensure_cursor_visible();
         }
     }
 
     pub fn goto_top(&mut self) {
-        self.row_offset = 0;
-        if let Some(ref mut scrollbar_state) = self.scrollbar {
-            scrollbar_state.first();
-        }
+        self.cursor_row = 0;
+        self.ensure_cursor_visible();
     }
+
     pub fn goto_bottom(&mut self) {
-        if self.total_rows > self.rows {
-            self.row_offset = self.total_rows - self.rows;
-        }
-        if let Some(ref mut scrollbar_state) = self.scrollbar {
-            scrollbar_state.last();
+        if self.total_rows > 0 {
+            self.cursor_row = self.total_rows - 1;
+            self.ensure_cursor_visible();
         }
     }
+
     pub fn goto_start(&mut self) {
-        self.col_offset = 0;
+        self.cursor_col = 0;
+        self.ensure_cursor_visible();
     }
+
     pub fn goto_end(&mut self) {
-        if let Some(col) = self.set_cols {
-            if col > self.cols {
-                self.col_offset = col - self.cols;
-            }
+        let width = self.grid_width();
+        if width > 0 {
+            self.cursor_col = width - 1;
+            self.ensure_cursor_visible();
         }
     }
 
     pub fn scroll_down(&mut self) {
-        if self.total_rows > self.rows * 3 / 2 {
-            if self.row_offset < (self.total_rows - self.rows - self.rows / 2) {
-                self.row_offset += self.rows / 2;
-                if let Some(scroll) = self.scrollbar {
-                    self.scrollbar = Some(scroll.position(self.row_offset));
-                }
-            } else {
-                self.row_offset = self.total_rows - self.rows;
-                if let Some(ref mut scrollbar_state) = self.scrollbar {
-                    scrollbar_state.last();
-                }
-            }
+        if self.rows == 0 || self.total_rows == 0 {
+            return;
         }
+        let step = (self.rows / 2).max(1);
+        self.cursor_row = (self.cursor_row + step).min(self.total_rows - 1);
+        self.ensure_cursor_visible();
     }
+
     pub fn scroll_up(&mut self) {
-        if self.row_offset > self.rows / 2 {
-            self.row_offset -= self.rows / 2;
-            if let Some(scroll) = self.scrollbar {
-                self.scrollbar = Some(scroll.position(self.row_offset));
-            }
-        } else {
-            self.row_offset = 0;
-            if let Some(ref mut scrollbar_state) = self.scrollbar {
-                scrollbar_state.first();
-            }
+        if self.rows == 0 {
+            return;
         }
+        let step = (self.rows / 2).max(1);
+        self.cursor_row = self.cursor_row.saturating_sub(step);
+        self.ensure_cursor_visible();
     }
 }
 
@@ -144,12 +181,13 @@ impl StatefulWidget for &FileViewer {
         state.rows = area.height as usize - 2;
 
         state.cols = cols as usize;
-        // Grid Width equals the Values-per-row used when indexing (auto-fit cols today).
-        let grid = Grid::from_buffer(&self.content, self.data_type, self.endianness, state.cols);
-        state.total_rows = match state.set_cols {
-            Some(col) if col > 0 => grid.values().len() / col,
-            _ => grid.height(),
-        };
+        // Logical Width: pinned set_cols, else auto-fit viewport columns.
+        let width = state.set_cols.filter(|&w| w > 0).unwrap_or(state.cols).max(1);
+        let grid = Grid::from_buffer(&self.content, self.data_type, self.endianness, width);
+        state.total_rows = grid.height();
+        state.clamp_cursor();
+        state.ensure_cursor_visible();
+        state.cursor_address = grid.address_at(state.cursor_row, state.cursor_col);
 
         self.render_header(cols, &areas[..], buf);
         self.render_data(
@@ -158,6 +196,8 @@ impl StatefulWidget for &FileViewer {
             state.col_offset,
             state.rows,
             state.cols,
+            state.cursor_row,
+            state.cursor_col,
             &areas[..],
             buf,
         );
@@ -227,6 +267,8 @@ impl FileViewer {
         col_offset: usize,
         rows: usize,
         cols: usize,
+        cursor_row: usize,
+        cursor_col: usize,
         areas: &[Rect],
         buf: &mut Buffer,
     ) {
@@ -236,7 +278,10 @@ impl FileViewer {
             y += 1;
             let mut area = areas[0];
             area.y = y;
-            Paragraph::new(format!(" {:08X} ", row * grid.width()))
+            let Some(row_addr) = grid.row_address(row) else {
+                break 'outer_loop;
+            };
+            Paragraph::new(format!(" {row_addr:08X} "))
                 .block(
                     Block::default()
                         .borders(Borders::RIGHT | Borders::LEFT)
@@ -260,9 +305,14 @@ impl FileViewer {
                     break 'outer_loop;
                 };
                 let text = format_value(value, self.display_type);
+                let style = if row == cursor_row && col == cursor_col {
+                    Style::default().fg(Color::Black).bg(Color::Yellow)
+                } else {
+                    Style::default().fg(Color::Yellow)
+                };
                 Paragraph::new(text)
                     .right_aligned()
-                    .style(Style::default().fg(Color::Yellow))
+                    .style(style)
                     .render(area, buf);
             }
         }
@@ -437,4 +487,66 @@ fn to_superscript(mut exp: i32) -> String {
     }
 
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state_with_grid(total_rows: usize, width: usize, viewport_rows: usize, viewport_cols: usize) -> FileViewerState {
+        FileViewerState {
+            total_rows,
+            cols: viewport_cols,
+            rows: viewport_rows,
+            set_cols: Some(width),
+            ..FileViewerState::default()
+        }
+    }
+
+    #[test]
+    fn cursor_moves_across_grid_values() {
+        let mut state = state_with_grid(4, 4, 4, 4);
+
+        assert_eq!(state.cursor(), (0, 0));
+        state.move_right();
+        assert_eq!(state.cursor(), (0, 1));
+        state.move_down();
+        assert_eq!(state.cursor(), (1, 1));
+        state.move_left();
+        assert_eq!(state.cursor(), (1, 0));
+        state.move_up();
+        assert_eq!(state.cursor(), (0, 0));
+    }
+
+    #[test]
+    fn cursor_navigation_scrolls_viewport_to_keep_cursor_visible() {
+        let mut state = state_with_grid(10, 4, 3, 2);
+
+        for _ in 0..3 {
+            state.move_down();
+        }
+        assert_eq!(state.cursor(), (3, 0));
+        assert_eq!(state.row_offset, 1);
+
+        state.goto_end();
+        assert_eq!(state.cursor(), (3, 3));
+        assert_eq!(state.col_offset, 2);
+    }
+
+    #[test]
+    fn cursor_stays_within_grid_bounds() {
+        let mut state = state_with_grid(2, 2, 2, 2);
+
+        state.move_up();
+        state.move_left();
+        assert_eq!(state.cursor(), (0, 0));
+
+        state.goto_bottom();
+        state.goto_end();
+        assert_eq!(state.cursor(), (1, 1));
+
+        state.move_down();
+        state.move_right();
+        assert_eq!(state.cursor(), (1, 1));
+    }
 }

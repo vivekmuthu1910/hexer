@@ -216,6 +216,12 @@ Preferred test surfaces (no ratatui frame snapshots):
   │ viewer::grid::Grid::from_buffer          │
   │   decode + Width/Height                  │
   │   Endianness Little/Big                  │
+  │   Address (byte offset) at Grid position │
+  ╰──────────────────────────────────────────╯
+
+  ╭──────────────────────────────────────────╮
+  │ viewer::file_viewer::FileViewerState     │
+  │   Cursor move / viewport follow          │
   ╰──────────────────────────────────────────╯
 ```
 
@@ -242,7 +248,7 @@ Documented in the domain model / parent spec but not fully wired yet:
 | View Mode (Binary \| Image) | Not implemented; chrome is Binary-style only |
 | User-set Width / Stride / Padding | Auto Width only; Stride = Width |
 | Viewport Width vs logical Width | Horizontal scroll APIs exist; logical Width not pinned |
-| Cursor + Address-as-byte-offset | Row label is still Value-index style (`row * Width`) |
+| Cursor + Address-as-byte-offset | Grid reports Address; Binary gutter + status use it; Cursor navigates Values |
 | CLI viewer option flags | Path only (`launch`); flags are future work |
 | Search | UI stub only |
 
