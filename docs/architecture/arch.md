@@ -208,6 +208,11 @@ Preferred test surfaces (no ratatui frame snapshots):
 
 ```
   ╭──────────────────────────────────────────╮
+  │ launch::parse_launch_config              │
+  │   path + flags -> LaunchConfig           │
+  ╰──────────────────────────────────────────╯
+
+  ╭──────────────────────────────────────────╮
   │ launch::resolve_launch                   │
   │   path cases -> LaunchWindow             │
   ╰──────────────────────────────────────────╯
@@ -233,7 +238,7 @@ UI widgets and the App loop are exercised manually / by construction from those 
 |-------|-----|
 | `ratatui` | Terminal widgets and layout |
 | `crossterm` | Input events, mouse capture |
-| `color-eyre` | Error reporting |
+| `clap` | CLI path + viewer option flags |
 | `num-traits` | Float formatting helpers |
 | `tracing`* | Debug-build logging to `tracing.log` |
 
@@ -249,7 +254,7 @@ Documented in the domain model / parent spec but not fully wired yet:
 | User-set Width / Stride / Padding | Width pin + Stride + Padding omit/show; Height from Stride |
 | Viewport Width vs logical Width | Viewport separate; horizontal Cursor scroll when Width exceeds it |
 | Cursor + Address-as-byte-offset | Grid reports Address; Binary gutter + status use it; Cursor navigates Values |
-| CLI viewer option flags | Path only (`launch`); flags are future work |
+| CLI viewer option flags | `launch` flags seed ViewerLaunchOptions; TUI remains editable |
 | Search | UI stub only |
 
 Architecture intent going forward: keep a **single Grid engine**; View Mode and layout knobs change inputs/chrome, not a second renderer.

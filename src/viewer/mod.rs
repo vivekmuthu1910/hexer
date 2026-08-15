@@ -16,7 +16,8 @@ mod common_dt;
 mod file_viewer;
 mod grid;
 
-use common_dt::{DataType, DisplayType, Endianness, ViewMode, stride_help_text};
+pub use common_dt::{DataType, DisplayType, Endianness, ViewMode};
+use common_dt::stride_help_text;
 
 #[derive(Debug, Default)]
 pub struct ViewerContainer {
@@ -56,6 +57,24 @@ fn render_button(name: String, btn_color: Color, text_color: Color) -> impl Widg
 impl ViewerContainer {
     pub fn with_file(mut self, file: PathBuf) -> Self {
         self.file = file;
+        self
+    }
+
+    /// Apply CLI launch options as the initial viewer session state (still editable in the TUI).
+    pub fn with_launch_options(mut self, options: &crate::launch::ViewerLaunchOptions) -> Self {
+        self.data_type = options.data_type;
+        self.display_type = options.display_type;
+        self.endianness = options.endianness;
+        self.view_mode = options.view_mode;
+        self.pinned_width = options.width;
+        self.pinned_stride = options.stride;
+        self.show_padding = options.show_padding;
+
+        self.file_viewer.set_data_type(options.data_type);
+        self.file_viewer.set_display_type(options.display_type);
+        self.file_viewer.set_endianness(options.endianness);
+        self.file_viewer.set_view_mode(options.view_mode);
+        self.sync_layout_to_viewer();
         self
     }
 
@@ -341,6 +360,7 @@ impl ViewerContainer {
             Span::styled(width_label, Style::default().fg(Color::Yellow).bold()),
             Span::styled("  Stride: ", Style::default().fg(Color::LightCyan).bold()),
             Span::styled(stride_label, Style::default().fg(Color::Yellow).bold()),
+            Span::styled(" (Values)", Style::default().fg(Color::DarkGray)),
             Span::styled("  Padding: ", Style::default().fg(Color::LightCyan).bold()),
             Span::styled(padding_label, Style::default().fg(Color::Yellow).bold()),
             Span::styled("  ?:help", Style::default().fg(Color::DarkGray)),
@@ -549,3 +569,56 @@ impl ViewerContainer {
         }
     }
 }
+
+#[cfg(test)]
+mod launch_options_tests {
+    use super::*;
+    use crate::launch::ViewerLaunchOptions;
+    use std::path::PathBuf;
+
+    #[test]
+    fn launch_options_seed_viewer_state() {
+        let options = ViewerLaunchOptions {
+            data_type: DataType::U32,
+            display_type: DisplayType::HexaDecimal,
+            endianness: Endianness::Big,
+            width: Some(16),
+            stride: Some(20),
+            view_mode: ViewMode::Image,
+            show_padding: true,
+        };
+        let viewer = ViewerContainer::default()
+            .with_file(PathBuf::from("sample.bin"))
+            .with_launch_options(&options);
+
+        assert_eq!(viewer.data_type, DataType::U32);
+        assert_eq!(viewer.display_type, DisplayType::HexaDecimal);
+        assert_eq!(viewer.endianness, Endianness::Big);
+        assert_eq!(viewer.pinned_width, Some(16));
+        assert_eq!(viewer.pinned_stride, Some(20));
+        assert_eq!(viewer.view_mode, ViewMode::Image);
+        assert!(viewer.show_padding);
+    }
+
+    #[test]
+    fn launch_options_do_not_freeze_tui_changes() {
+        let options = ViewerLaunchOptions {
+            data_type: DataType::U16,
+            ..ViewerLaunchOptions::default()
+        };
+        let mut viewer = ViewerContainer::default()
+            .with_file(PathBuf::from("sample.bin"))
+            .with_launch_options(&options);
+
+        assert_eq!(viewer.data_type, DataType::U16);
+        // Same mutations the TUI key handlers perform after launch.
+        viewer.data_type = DataType::U8;
+        viewer.file_viewer.set_data_type(DataType::U8);
+        viewer.display_type = DisplayType::HexaDecimal;
+        viewer.pinned_width = Some(4);
+        assert_eq!(viewer.data_type, DataType::U8);
+        assert_eq!(viewer.display_type, DisplayType::HexaDecimal);
+        assert_eq!(viewer.pinned_width, Some(4));
+    }
+}
+

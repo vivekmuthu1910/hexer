@@ -1,6 +1,4 @@
-use std::env;
 use std::io::stdout;
-use std::path::PathBuf;
 
 use color_eyre::Result;
 use crossterm::event::{
@@ -9,7 +7,7 @@ use crossterm::event::{
 };
 use crossterm::execute;
 use file_picker::{FilePickerEvent, FilePickerState};
-use launch::{LaunchWindow, resolve_launch};
+use launch::{LaunchConfig, LaunchWindow, ViewerLaunchOptions, parse_launch_config_from_env};
 use ratatui::{DefaultTerminal, Frame};
 use viewer::{ViewerContainer, ViewerContainerEvent};
 
@@ -32,12 +30,11 @@ fn main() -> color_eyre::Result<()> {
     #[cfg(debug_assertions)]
     info!("Starting hexer");
 
-    let path = env::args().nth(1).map(PathBuf::from);
-    let launch = resolve_launch(path.as_deref())?;
+    let config = parse_launch_config_from_env()?;
 
     let terminal = ratatui::init();
     execute!(stdout(), EnableMouseCapture)?;
-    let result = App::from_launch(launch).run(terminal);
+    let result = App::from_launch(config).run(terminal);
     execute!(stdout(), DisableMouseCapture)?;
     ratatui::restore();
 
@@ -62,6 +59,8 @@ impl Default for Window {
 pub struct App {
     window: Window,
     running: bool,
+    /// CLI-seeded options; reapplied when opening a File from the File Picker.
+    viewer_options: ViewerLaunchOptions,
 }
 
 impl App {
@@ -69,19 +68,31 @@ impl App {
         Self::default()
     }
 
-    pub fn from_launch(launch: LaunchWindow) -> Self {
-        let window = match launch {
+    pub fn from_launch(config: LaunchConfig) -> Self {
+        let viewer_options = config.options;
+        let window = match config.window {
             LaunchWindow::FilePicker { cwd } => {
                 Window::FilePicker(FilePickerState::default().with_cwd(cwd))
             }
-            LaunchWindow::Viewer { file } => {
-                Window::HexViewer(ViewerContainer::default().with_file(file))
-            }
+            LaunchWindow::Viewer { file } => Window::HexViewer(
+                ViewerContainer::default()
+                    .with_file(file)
+                    .with_launch_options(&viewer_options),
+            ),
         };
         Self {
             window,
             running: false,
+            viewer_options,
         }
+    }
+
+    fn open_viewer(&self, file: std::path::PathBuf) -> Window {
+        Window::HexViewer(
+            ViewerContainer::default()
+                .with_file(file)
+                .with_launch_options(&self.viewer_options),
+        )
     }
 
     pub fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
@@ -137,7 +148,7 @@ impl App {
             Window::FilePicker(ref mut state) => match state.handle_key(key) {
                 FilePickerEvent::Quit => self.quit(),
                 FilePickerEvent::SelectedFile(f) => {
-                    self.window = Window::HexViewer(ViewerContainer::default().with_file(f))
+                    self.window = self.open_viewer(f);
                 }
                 FilePickerEvent::Poll => {}
             },
