@@ -48,14 +48,14 @@ src/
     ╰── common_dt.rs     Data Type, Display Type, Endianness
 ```
 
-│ Module │ Role │
-│────────│──────│
-│ `launch` │ Pure mapping: optional path -> File Picker vs viewer │
-│ `file_picker` │ Browse directories; open a File │
-│ `viewer` │ Viewer chrome, option controls, load File bytes │
-│ `viewer::grid` │ Decode Buffer into addressable Values │
-│ `viewer::file_viewer` │ Stateful widget: layout, format, scroll │
-│ `utils` │ Shared helpers (path truncation, auto Width fit) │
+| Module | Role |
+|--------|------|
+| `launch` | Pure mapping: optional path -> File Picker vs viewer |
+| `file_picker` | Browse directories; open a File |
+| `viewer` | Viewer chrome, option controls, load File bytes |
+| `viewer::grid` | Decode Buffer into addressable Values |
+| `viewer::file_viewer` | Stateful widget: layout, format, scroll |
+| `utils` | Shared helpers (path truncation, auto Width fit) |
 
 ## Startup and windows
 
@@ -159,7 +159,7 @@ Current layout assumptions inside the Grid:
   Width = 4
 
   values:  V0  V1  V2  V3  V4  V5  V6  V7  ...
-           ╰─── row 0 ────╯  ╰─── row 1 ────╯
+           ╰── row 0 ───╯  ╰── row 1 ───╯
 ```
 
 ## Event flow
@@ -223,13 +223,13 @@ UI widgets and the App loop are exercised manually / by construction from those 
 
 ## Dependencies (runtime)
 
-│ Crate │ Use │
-│-------│-----│
-│ `ratatui` │ Terminal widgets and layout │
-│ `crossterm` │ Input events, mouse capture │
-│ `color-eyre` │ Error reporting │
-│ `num-traits` │ Float formatting helpers │
-│ `tracing`* │ Debug-build logging to `tracing.log` │
+| Crate | Use |
+|-------|-----|
+| `ratatui` | Terminal widgets and layout |
+| `crossterm` | Input events, mouse capture |
+| `color-eyre` | Error reporting |
+| `num-traits` | Float formatting helpers |
+| `tracing`* | Debug-build logging to `tracing.log` |
 
 \* tracing stack is compiled for debug builds.
 
@@ -237,13 +237,13 @@ UI widgets and the App loop are exercised manually / by construction from those 
 
 Documented in the domain model / parent spec but not fully wired yet:
 
-│ Concept │ Status │
-│--------│--------│
-│ View Mode (Binary \│ Image) │ Not implemented; chrome is Binary-style only │
-│ User-set Width / Stride / Padding │ Auto Width only; Stride = Width │
-│ Viewport Width vs logical Width │ Horizontal scroll APIs exist; logical Width not pinned │
-│ Cursor + Address-as-byte-offset │ Row label is still Value-index style (`row * Width`) │
-│ CLI viewer option flags │ Path only (`launch`); flags are future work │
-│ Search │ UI stub only │
+| Concept | Status |
+|--------|--------|
+| View Mode (Binary \| Image) | Not implemented; chrome is Binary-style only |
+| User-set Width / Stride / Padding | Auto Width only; Stride = Width |
+| Viewport Width vs logical Width | Horizontal scroll APIs exist; logical Width not pinned |
+| Cursor + Address-as-byte-offset | Row label is still Value-index style (`row * Width`) |
+| CLI viewer option flags | Path only (`launch`); flags are future work |
+| Search | UI stub only |
 
 Architecture intent going forward: keep a **single Grid engine**; View Mode and layout knobs change inputs/chrome, not a second renderer.
