@@ -145,7 +145,7 @@ impl StatefulWidget for &FileViewer {
 
         state.cols = cols as usize;
         // Grid Width equals the Values-per-row used when indexing (auto-fit cols today).
-        let grid = Grid::from_buffer(&self.content, self.data_type, state.cols);
+        let grid = Grid::from_buffer(&self.content, self.data_type, self.endianness, state.cols);
         state.total_rows = match state.set_cols {
             Some(col) if col > 0 => grid.values().len() / col,
             _ => grid.height(),

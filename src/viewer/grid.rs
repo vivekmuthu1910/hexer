@@ -1,5 +1,4 @@
-use super::common_dt::DataType;
-use bytemuck::{AnyBitPattern, cast_slice};
+use super::common_dt::{DataType, Endianness};
 
 /// One typed unit decoded from the Buffer.
 #[derive(Debug, Clone, PartialEq)]
@@ -24,20 +23,73 @@ pub struct Grid {
 }
 
 impl Grid {
-    /// Decode a Buffer into a Grid using today's layout assumptions:
-    /// host Endianness (`cast_slice`), Stride = Width.
-    pub fn from_buffer(buffer: &[u8], data_type: DataType, width: usize) -> Self {
+    /// Decode a Buffer into a Grid. Stride = Width.
+    /// Endianness selects byte order for multi-byte Values (default Little).
+    pub fn from_buffer(
+        buffer: &[u8],
+        data_type: DataType,
+        endianness: Endianness,
+        width: usize,
+    ) -> Self {
         let values = match data_type {
-            DataType::U8 => decode_host(buffer, Value::U8),
-            DataType::I8 => decode_host(buffer, Value::I8),
-            DataType::U16 => decode_host(buffer, Value::U16),
-            DataType::I16 => decode_host(buffer, Value::I16),
-            DataType::U32 => decode_host(buffer, Value::U32),
-            DataType::I32 => decode_host(buffer, Value::I32),
-            DataType::U64 => decode_host(buffer, Value::U64),
-            DataType::I64 => decode_host(buffer, Value::I64),
-            DataType::F32 => decode_host(buffer, Value::F32),
-            DataType::F64 => decode_host(buffer, Value::F64),
+            DataType::U8 => buffer.iter().map(|&b| Value::U8(b)).collect(),
+            DataType::I8 => buffer.iter().map(|&b| Value::I8(b as i8)).collect(),
+            DataType::U16 => decode_endian(
+                buffer,
+                endianness,
+                u16::from_le_bytes,
+                u16::from_be_bytes,
+                Value::U16,
+            ),
+            DataType::I16 => decode_endian(
+                buffer,
+                endianness,
+                i16::from_le_bytes,
+                i16::from_be_bytes,
+                Value::I16,
+            ),
+            DataType::U32 => decode_endian(
+                buffer,
+                endianness,
+                u32::from_le_bytes,
+                u32::from_be_bytes,
+                Value::U32,
+            ),
+            DataType::I32 => decode_endian(
+                buffer,
+                endianness,
+                i32::from_le_bytes,
+                i32::from_be_bytes,
+                Value::I32,
+            ),
+            DataType::U64 => decode_endian(
+                buffer,
+                endianness,
+                u64::from_le_bytes,
+                u64::from_be_bytes,
+                Value::U64,
+            ),
+            DataType::I64 => decode_endian(
+                buffer,
+                endianness,
+                i64::from_le_bytes,
+                i64::from_be_bytes,
+                Value::I64,
+            ),
+            DataType::F32 => decode_endian(
+                buffer,
+                endianness,
+                f32::from_le_bytes,
+                f32::from_be_bytes,
+                Value::F32,
+            ),
+            DataType::F64 => decode_endian(
+                buffer,
+                endianness,
+                f64::from_le_bytes,
+                f64::from_be_bytes,
+                Value::F64,
+            ),
         };
         Self { width, values }
     }
@@ -66,15 +118,28 @@ impl Grid {
     }
 }
 
-fn decode_host<T, F>(buffer: &[u8], wrap: F) -> Vec<Value>
+fn decode_endian<const N: usize, T, FLe, FBe, FWrap>(
+    buffer: &[u8],
+    endianness: Endianness,
+    from_le: FLe,
+    from_be: FBe,
+    wrap: FWrap,
+) -> Vec<Value>
 where
-    T: AnyBitPattern + Copy,
-    F: Fn(T) -> Value,
+    FLe: Fn([u8; N]) -> T,
+    FBe: Fn([u8; N]) -> T,
+    FWrap: Fn(T) -> Value,
 {
-    cast_slice::<u8, T>(buffer)
-        .iter()
-        .copied()
-        .map(wrap)
+    buffer
+        .chunks_exact(N)
+        .map(|chunk| {
+            let bytes: [u8; N] = chunk.try_into().expect("chunks_exact size");
+            let value = match endianness {
+                Endianness::Little => from_le(bytes),
+                Endianness::Big => from_be(bytes),
+            };
+            wrap(value)
+        })
         .collect()
 }
 
@@ -85,47 +150,83 @@ mod tests {
     #[test]
     fn u8_buffer_yields_values_in_row_major_order() {
         let buffer = [1u8, 2, 3, 4, 5];
-        let grid = Grid::from_buffer(&buffer, DataType::U8, 2);
+        let grid = Grid::from_buffer(&buffer, DataType::U8, Endianness::Little, 2);
 
         assert_eq!(grid.width(), 2);
-        assert_eq!(grid.height(), 2); // floor(5/2) — parity with total_rows
+        assert_eq!(grid.height(), 2);
         assert_eq!(grid.value_at(0, 0), Some(&Value::U8(1)));
         assert_eq!(grid.value_at(0, 1), Some(&Value::U8(2)));
         assert_eq!(grid.value_at(1, 0), Some(&Value::U8(3)));
         assert_eq!(grid.value_at(1, 1), Some(&Value::U8(4)));
-        assert_eq!(grid.value_at(2, 0), Some(&Value::U8(5))); // still addressable
-        assert_eq!(grid.value_at(0, 2), Some(&Value::U8(3))); // flat index parity
+        assert_eq!(grid.value_at(2, 0), Some(&Value::U8(5)));
+        assert_eq!(grid.value_at(0, 2), Some(&Value::U8(3)));
         assert_eq!(grid.value_at(2, 1), None);
     }
 
     #[test]
-    #[cfg(target_endian = "little")]
-    fn u16_decodes_with_host_endianness() {
-        // Bytes as laid out for native cast_slice on little-endian hosts.
+    fn u16_little_endian_decodes_multi_byte_values() {
         let buffer = [0x34, 0x12, 0x78, 0x56];
-        let grid = Grid::from_buffer(&buffer, DataType::U16, 2);
+        let grid = Grid::from_buffer(&buffer, DataType::U16, Endianness::Little, 2);
 
-        assert_eq!(grid.width(), 2);
-        assert_eq!(grid.height(), 1);
         assert_eq!(grid.value_at(0, 0), Some(&Value::U16(0x1234)));
         assert_eq!(grid.value_at(0, 1), Some(&Value::U16(0x5678)));
     }
 
     #[test]
-    #[cfg(target_endian = "little")]
-    fn f32_decodes_with_host_endianness() {
-        let buffer = 1.0f32.to_le_bytes();
-        let grid = Grid::from_buffer(&buffer, DataType::F32, 1);
+    fn u16_big_endian_decodes_multi_byte_values() {
+        let buffer = [0x34, 0x12, 0x78, 0x56];
+        let grid = Grid::from_buffer(&buffer, DataType::U16, Endianness::Big, 2);
 
-        assert_eq!(grid.height(), 1);
-        assert_eq!(grid.value_at(0, 0), Some(&Value::F32(1.0)));
+        assert_eq!(grid.value_at(0, 0), Some(&Value::U16(0x3412)));
+        assert_eq!(grid.value_at(0, 1), Some(&Value::U16(0x7856)));
+    }
+
+    #[test]
+    fn u8_is_unaffected_by_endianness() {
+        let buffer = [0xABu8, 0xCD];
+        let little = Grid::from_buffer(&buffer, DataType::U8, Endianness::Little, 2);
+        let big = Grid::from_buffer(&buffer, DataType::U8, Endianness::Big, 2);
+
+        assert_eq!(little.values(), big.values());
+        assert_eq!(little.value_at(0, 0), Some(&Value::U8(0xAB)));
+        assert_eq!(big.value_at(0, 1), Some(&Value::U8(0xCD)));
+    }
+
+    #[test]
+    fn i8_is_unaffected_by_endianness() {
+        let buffer = [0xFFu8, 0x01];
+        let little = Grid::from_buffer(&buffer, DataType::I8, Endianness::Little, 2);
+        let big = Grid::from_buffer(&buffer, DataType::I8, Endianness::Big, 2);
+
+        assert_eq!(little.values(), big.values());
+        assert_eq!(little.value_at(0, 0), Some(&Value::I8(-1)));
+        assert_eq!(big.value_at(0, 1), Some(&Value::I8(1)));
+    }
+
+    #[test]
+    fn f32_little_and_big_endian_differ() {
+        let le_bytes = 1.0f32.to_le_bytes();
+        let be_bytes = 1.0f32.to_be_bytes();
+
+        let from_le = Grid::from_buffer(&le_bytes, DataType::F32, Endianness::Little, 1);
+        let from_be = Grid::from_buffer(&be_bytes, DataType::F32, Endianness::Big, 1);
+        let wrong_order = Grid::from_buffer(&le_bytes, DataType::F32, Endianness::Big, 1);
+
+        assert_eq!(from_le.value_at(0, 0), Some(&Value::F32(1.0)));
+        assert_eq!(from_be.value_at(0, 0), Some(&Value::F32(1.0)));
+        assert_ne!(wrong_order.value_at(0, 0), Some(&Value::F32(1.0)));
     }
 
     #[test]
     fn stride_equals_width_for_height() {
         let buffer = [0u8; 12];
-        let grid = Grid::from_buffer(&buffer, DataType::U8, 4);
+        let grid = Grid::from_buffer(&buffer, DataType::U8, Endianness::Little, 4);
         assert_eq!(grid.height(), 3);
         assert_eq!(grid.values().len(), 12);
+    }
+
+    #[test]
+    fn default_endianness_is_little() {
+        assert_eq!(Endianness::default(), Endianness::Little);
     }
 }
