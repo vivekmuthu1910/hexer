@@ -1,6 +1,8 @@
 use std::fmt;
 
-#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
+use clap::ValueEnum;
+
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy, ValueEnum)]
 pub enum DataType {
     #[default]
     U8,
@@ -15,10 +17,12 @@ pub enum DataType {
     F64,
 }
 
-#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy, ValueEnum)]
 pub enum DisplayType {
     #[default]
+    #[value(alias = "dec")]
     Decimal,
+    #[value(name = "hex")]
     HexaDecimal,
 }
 
@@ -46,15 +50,17 @@ impl DataType {
         }
     }
 }
-#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy, ValueEnum)]
 pub enum Endianness {
     #[default]
+    #[value(alias = "le")]
     Little,
+    #[value(alias = "be")]
     Big,
 }
 
 /// View Mode toggles Grid chrome and defaults — not a separate rendering engine.
-#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy, ValueEnum)]
 pub enum ViewMode {
     #[default]
     Binary,

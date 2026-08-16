@@ -41,17 +41,27 @@ struct Cli {
     /// File or directory path (absent → File Picker at cwd; directory → File Picker there; file → viewer)
     path: Option<PathBuf>,
 
-    /// Data Type (u8, i8, u16, i16, u32, i32, u64, i64, f32, f64)
-    #[arg(long = "data-type", value_name = "TYPE")]
-    data_type: Option<String>,
+    /// Data Type
+    #[arg(
+        long = "data-type",
+        value_name = "TYPE",
+        value_enum,
+        ignore_case = true
+    )]
+    data_type: Option<DataType>,
 
-    /// Display Type for integers: decimal or hex
-    #[arg(long = "display")]
-    display: Option<String>,
+    /// Display Type for integers
+    #[arg(long = "display", value_enum, ignore_case = true)]
+    display: Option<DisplayType>,
 
-    /// Endianness for multi-byte Values: little or big
-    #[arg(long = "endianness", value_name = "ORDER")]
-    endianness: Option<String>,
+    /// Endianness for multi-byte Values
+    #[arg(
+        long = "endianness",
+        value_name = "ORDER",
+        value_enum,
+        ignore_case = true
+    )]
+    endianness: Option<Endianness>,
 
     /// Width in Values per row (pins Width; omit for Binary auto-fit)
     #[arg(long = "width", value_name = "N")]
@@ -61,9 +71,14 @@ struct Cli {
     #[arg(long = "stride", value_name = "N")]
     stride: Option<usize>,
 
-    /// View Mode: binary (default) or image
-    #[arg(long = "view-mode", value_name = "MODE")]
-    view_mode: Option<String>,
+    /// View Mode
+    #[arg(
+        long = "view-mode",
+        value_name = "MODE",
+        value_enum,
+        ignore_case = true
+    )]
+    view_mode: Option<ViewMode>,
 
     /// Show Padding Values (Stride−Width) in the Grid
     #[arg(long = "show-padding", default_value_t = false)]
@@ -94,14 +109,14 @@ fn launch_config_from_cli(cli: Cli) -> Result<LaunchConfig> {
 
 fn viewer_options_from_cli(cli: &Cli) -> Result<ViewerLaunchOptions> {
     let mut options = ViewerLaunchOptions::default();
-    if let Some(ref s) = cli.data_type {
-        options.data_type = parse_data_type(s)?;
+    if let Some(data_type) = cli.data_type {
+        options.data_type = data_type;
     }
-    if let Some(ref s) = cli.display {
-        options.display_type = parse_display_type(s)?;
+    if let Some(display) = cli.display {
+        options.display_type = display;
     }
-    if let Some(ref s) = cli.endianness {
-        options.endianness = parse_endianness(s)?;
+    if let Some(endianness) = cli.endianness {
+        options.endianness = endianness;
     }
     if let Some(w) = cli.width {
         if w == 0 {
@@ -115,8 +130,8 @@ fn viewer_options_from_cli(cli: &Cli) -> Result<ViewerLaunchOptions> {
         }
         options.stride = Some(s);
     }
-    if let Some(ref s) = cli.view_mode {
-        options.view_mode = parse_view_mode(s)?;
+    if let Some(view_mode) = cli.view_mode {
+        options.view_mode = view_mode;
     }
     options.show_padding = cli.show_padding;
 
@@ -170,52 +185,6 @@ pub fn help_text() -> String {
     let mut buf = Vec::new();
     cmd.write_long_help(&mut buf).expect("help write");
     String::from_utf8(buf).expect("help utf8")
-}
-
-fn parse_data_type(s: &str) -> Result<DataType> {
-    match s.to_ascii_lowercase().as_str() {
-        "u8" => Ok(DataType::U8),
-        "i8" => Ok(DataType::I8),
-        "u16" => Ok(DataType::U16),
-        "i16" => Ok(DataType::I16),
-        "u32" => Ok(DataType::U32),
-        "i32" => Ok(DataType::I32),
-        "u64" => Ok(DataType::U64),
-        "i64" => Ok(DataType::I64),
-        "f32" => Ok(DataType::F32),
-        "f64" => Ok(DataType::F64),
-        other => Err(eyre!(
-            "unknown --data-type '{other}' (expected u8|i8|u16|i16|u32|i32|u64|i64|f32|f64)"
-        )),
-    }
-}
-
-fn parse_display_type(s: &str) -> Result<DisplayType> {
-    match s.to_ascii_lowercase().as_str() {
-        "decimal" | "dec" => Ok(DisplayType::Decimal),
-        "hex" => Ok(DisplayType::HexaDecimal),
-        other => Err(eyre!("unknown --display '{other}' (expected decimal|hex)")),
-    }
-}
-
-fn parse_endianness(s: &str) -> Result<Endianness> {
-    match s.to_ascii_lowercase().as_str() {
-        "little" | "le" => Ok(Endianness::Little),
-        "big" | "be" => Ok(Endianness::Big),
-        other => Err(eyre!(
-            "unknown --endianness '{other}' (expected little|big)"
-        )),
-    }
-}
-
-fn parse_view_mode(s: &str) -> Result<ViewMode> {
-    match s.to_ascii_lowercase().as_str() {
-        "binary" => Ok(ViewMode::Binary),
-        "image" => Ok(ViewMode::Image),
-        other => Err(eyre!(
-            "unknown --view-mode '{other}' (expected binary|image)"
-        )),
-    }
 }
 
 #[cfg(test)]
