@@ -35,8 +35,7 @@ pub struct LaunchConfig {
 #[command(
     name = "hexer",
     about = "View binary Buffers as a typed Grid",
-    long_about = "Hexer visualizes a binary Buffer as a typed Grid.\n\n\
-Stride is counted in Values (not bytes)."
+    long_about = "Hexer visualizes a binary Buffer as a typed Grid.\n\n"
 )]
 struct Cli {
     /// File or directory path (absent → File Picker at cwd; directory → File Picker there; file → viewer)
@@ -165,6 +164,7 @@ pub fn resolve_launch(path: Option<&Path>) -> std::io::Result<LaunchWindow> {
 }
 
 /// Long help text for `--help` (includes Stride unit note).
+#[cfg(test)]
 pub fn help_text() -> String {
     let mut cmd = Cli::command();
     let mut buf = Vec::new();
@@ -194,9 +194,7 @@ fn parse_display_type(s: &str) -> Result<DisplayType> {
     match s.to_ascii_lowercase().as_str() {
         "decimal" | "dec" => Ok(DisplayType::Decimal),
         "hex" => Ok(DisplayType::HexaDecimal),
-        other => Err(eyre!(
-            "unknown --display '{other}' (expected decimal|hex)"
-        )),
+        other => Err(eyre!("unknown --display '{other}' (expected decimal|hex)")),
     }
 }
 
@@ -306,12 +304,7 @@ mod tests {
         ])
         .unwrap();
 
-        assert_eq!(
-            cfg.window,
-            LaunchWindow::Viewer {
-                file: file.clone()
-            }
-        );
+        assert_eq!(cfg.window, LaunchWindow::Viewer { file: file.clone() });
         assert_eq!(cfg.options.data_type, DataType::U16);
         assert_eq!(cfg.options.display_type, DisplayType::HexaDecimal);
         assert_eq!(cfg.options.endianness, Endianness::Big);

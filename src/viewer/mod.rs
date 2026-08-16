@@ -6,7 +6,7 @@ use ratatui::{
     layout::{Constraint, Flex, Layout, Margin, Rect},
     style::{Color, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph, Widget},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget},
 };
 use std::{fs, io::Result, path::PathBuf};
 #[cfg(debug_assertions)]
@@ -16,8 +16,8 @@ mod common_dt;
 mod file_viewer;
 mod grid;
 
-pub use common_dt::{DataType, DisplayType, Endianness, ViewMode};
 use common_dt::stride_help_text;
+pub use common_dt::{DataType, DisplayType, Endianness, ViewMode};
 
 #[derive(Debug, Default)]
 pub struct ViewerContainer {
@@ -181,11 +181,7 @@ impl ViewerContainer {
         self.pinned_width
             .or_else(|| {
                 let w = self.file_viewer_state.viewport_width();
-                if w > 0 {
-                    Some(w)
-                } else {
-                    None
-                }
+                if w > 0 { Some(w) } else { None }
             })
             .unwrap_or(1)
             .max(1)
@@ -386,6 +382,7 @@ impl ViewerContainer {
             horizontal: area.width.saturating_sub(60) / 2,
             vertical: area.height.saturating_sub(10) / 2,
         });
+        frame.render_widget(Clear, inner);
         frame.render_widget(Paragraph::new(help).block(block), inner);
     }
 
@@ -621,4 +618,3 @@ mod launch_options_tests {
         assert_eq!(viewer.pinned_width, Some(4));
     }
 }
-
